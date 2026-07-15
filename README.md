@@ -94,9 +94,11 @@ its deps → pull knowledge → execute → trace a failure → `GET /root-cause
 `op.set` (version bumps). Then run `npm test` for the smoke test, or `npm run cli -- ops` for a
 terminal client. Full walkthroughs for **Claude Code** and **GPT** live in [`examples/`](./examples/).
 
-`npm run test:concurrency` proves the core promise: it fires 60 concurrent writers and checks the
-database ended up exactly consistent — every insert landed with a unique id, concurrent upserts to one
-key leave one row, and no version bump is lost. That is the guarantee a shared JSON file cannot give you.
+`npm run test:concurrency` proves the core promise the honest way: it spawns **two separate server
+processes sharing one database** and fires concurrent writes at both. The key check is a read-then-write
+race — 40 concurrent `op.set` version bumps across the two processes must end at exactly N+1, none lost.
+Two processes writing a shared JSON file would clobber each other; SQLite's WAL + `BEGIN IMMEDIATE` +
+`busy_timeout` serialize them. That is the guarantee a shared file cannot give you.
 
 ---
 
@@ -145,7 +147,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/health` | Liveness + counts |
 | POST | `/action` | The one atomic write gateway |
 
-**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `import.bundle`.
+**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `ui.del` · `import.bundle`.
 
 Share or back up a whole setup: `curl localhost:8791/export > my-system.json`, then on another instance `curl -X POST localhost:8791/action -d '{"action":"import.bundle","payload":'"$(cat my-system.json)"'}'`.
 

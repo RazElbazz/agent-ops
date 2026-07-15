@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test.mjs — smoke test. Starts nothing; assumes the server is running (node server.mjs).
 //   node test.mjs
-const BASE = process.env.AGENT_OPS || 'http://localhost:8791'
+const BASE = process.env.AGENT_OPS || 'http://127.0.0.1:8791'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) { pass++; console.log('  ✓ ' + name) } else { fail++; console.log('  ✗ ' + name) } }
 const get = async p => (await fetch(BASE + p)).json()
@@ -37,6 +37,13 @@ try {
   ok('null JSON body is 400 (not 500)', (await rawPost('null')) === 400) // finding #5
   ok('bad percent-encoding is 404 (not 500)', (await fetch(BASE + '/op/%E0%A4%A')).status === 404) // finding #6
   ok('ui.set with only key does not 500', (await post('ui.set', { key: '__uitest' })).ok === true) // finding #4
+  ok('ui.del removes a ui key', (await post('ui.del', { key: '__uitest' })).ok === true)
+  ok('non-array deps rejected with 400 (not stored)', (await post('op.set', { name: '__badtype', deps: 5 })).error !== undefined) // 2nd-audit finding #2
+  ok('non-string title rejected with 400', (await post('task.add', { title: { x: 1 } })).error !== undefined) // finding #5
+  const mixed = await post('import.bundle', { operations: [{ name: 'okop' }, { name: { bad: 1 } }, { name: 'okop2', deps: 5 }] }) // finding #1
+  ok('import.bundle applies valid ops, skips bad ones (no abort)', mixed.ok && mixed.result.operations === 1 && (mixed.result.skipped || []).length === 2)
+  ok('import.bundle kept the valid op', !!(await get('/op/okop')))
+  for (const nm of ['okop', 'okop2', '__badtype']) await post('op.del', { name: nm }) // cleanup
   const badBundle = await post('import.bundle', { knowledge: [{ category: '__ib', key: 'good', value: 'v' }, { category: '__ib', key: 'bad' }] }) // finding #3
   ok('import.bundle is partial-safe (good applied, bad skipped)', badBundle.ok && badBundle.result.knowledge === 1 && (badBundle.result.skipped || []).length === 1)
   ok('import.bundle kept the valid item', !!(await get('/knowledge?category=__ib')).find(k => k.key === 'good'))

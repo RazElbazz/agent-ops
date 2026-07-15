@@ -6,7 +6,7 @@
 import { db, run, get, nowISO } from './lib/db.mjs'
 
 if (process.argv.includes('--reset')) {
-  for (const t of ['operations', 'components', 'knowledge', 'tasks', 'records', 'actions_log', 'traces']) db.exec('DELETE FROM ' + t)
+  for (const t of ['operations', 'components', 'knowledge', 'tasks', 'records', 'actions_log', 'traces', 'ui']) db.exec('DELETE FROM ' + t)
   console.log('reset: all tables cleared')
 }
 const now = nowISO(), today = now.slice(0, 10)

@@ -47,7 +47,7 @@ async function j(u){var r=await fetch(u);return r.json();}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function toast(m){var e=document.getElementById('toast');e.textContent=m;e.classList.add('on');setTimeout(function(){e.classList.remove('on');},1800);}
-async function act(action,payload){try{var r=await fetch('/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action,payload:payload||{},chat:'ui'})});var jr=await r.json();toast(jr.ok?(action+' ✓'):(jr.error||'error'));render();}catch(e){toast('error: '+e.message);}}
+async function act(action,payload){try{var r=await fetch('/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action,payload:payload||{},chat:'ui'})});var jr=await r.json();toast(jr.ok?(action+' ✓'):(jr.error||'error'));_exp=null;render();}catch(e){toast('error: '+e.message);}}
 async function boot(){
  try{UI=Object.assign(UI,await j('/ui'));}catch(e){}
  t=L[UI.lang]||L.en; document.dir=UI.lang==='he'?'rtl':'ltr';
@@ -59,18 +59,16 @@ async function boot(){
  var hash=(location.hash||'').replace('#','');
  if(hash&&UI.tabs.indexOf(hash)>=0)cur=hash;
  else if(!cur||UI.tabs.indexOf(cur)<0)cur=UI.tabs[0]||'overview';
- document.getElementById('tabs').innerHTML=(UI.tabs||[]).map(function(x){return '<button class="tab'+(cur===x?' on':'')+'" onclick="tab(\''+x+'\')">'+(t[x]||x)+'</button>';}).join('');
+ document.getElementById('tabs').innerHTML=(UI.tabs||[]).map(function(x){return '<button class="tab'+(cur===x?' on':'')+'" data-tab="'+escAttr(x)+'">'+esc(t[x]||x)+'</button>';}).join('');
+ document.querySelectorAll('#tabs .tab').forEach(function(el){el.onclick=function(){tab(el.getAttribute('data-tab'));};});
  render();
 }
 function render(){
- document.querySelectorAll('#tabs .tab').forEach(function(b){b.className='tab'+(b.textContent===(t[cur]||cur)?' on':'');});
+ document.querySelectorAll('#tabs .tab').forEach(function(b){b.className='tab'+(b.getAttribute('data-tab')===cur?' on':'');});
  var v=document.getElementById('view');
- if(cur==='overview')return renderOverview(v);
- if(cur==='operations')return renderOps(v);
- if(cur==='knowledge')return renderKnowledge(v);
- if(cur==='tasks')return renderTasks(v);
- if(cur==='activity')return renderActivity(v);
- v.innerHTML='<div class="card muted">'+esc(cur)+'</div>';
+ var fn={overview:renderOverview,operations:renderOps,knowledge:renderKnowledge,tasks:renderTasks,activity:renderActivity}[cur];
+ if(!fn){v.innerHTML='<div class="card muted">'+esc(cur)+'</div>';return;}
+ Promise.resolve(fn(v)).catch(function(){v.innerHTML='<div class="card">'+esc(t.noconn)+'</div>';});
 }
 async function renderOverview(v){if(!M){v.innerHTML='<div class="card">'+t.noconn+'</div>';return;}
  var byCat={};M.components.forEach(function(c){(byCat[c.category]=byCat[c.category]||[]).push(c);});
@@ -110,7 +108,7 @@ async function renderKnowledge(v){var cats=(M&&M.knowledgeCategories)||[];
 async function loadK(){var cat=document.getElementById('kcat').value,q=document.getElementById('kq').value;var rows=await j('/knowledge?'+(cat?'category='+encodeURIComponent(cat):'')+(q?'&q='+encodeURIComponent(q):''));
  document.getElementById('kres').innerHTML=rows.map(function(r){return '<div class="card"><div class="k">'+esc(r.category)+' · '+esc(r.key)+'</div><div class="opsum">'+esc(r.value)+'</div></div>';}).join('')||'<div class="muted">'+t.empty+'</div>';}
 async function renderTasks(v){var ts=await j('/tasks');var active=ts.filter(function(x){return x.status!=='done';});
- v.innerHTML='<div class="kpis"><div class="kpi"><div class="n">'+active.length+'</div><div class="l">'+t.active+'</div></div><div class="kpi"><div class="n">'+ts.filter(function(x){return x.status==='done';}).length+'</div><div class="l">'+t.done+'</div></div></div><div class="card">'+active.map(function(x){return '<div class="row"><span class="pri p'+(x.priority||2)+'">P'+(x.priority||2)+'</span><span class="own">'+esc(x.owner)+'</span><span class="chip cat">'+esc(x.stream)+'</span><span style="flex:1">'+esc(x.title)+'</span>'+(x.deadline?'<span class="mono">'+esc(x.deadline)+'</span>':'')+'<button class="btn ghost" title="'+(t.markdone||'done')+'" style="padding:1px 9px;font-size:12px;line-height:1.4" onclick="event.stopPropagation();act(\'task.done\',{id:'+x.id+'})">✓</button></div>';}).join('')+'</div>';}
+ v.innerHTML='<div class="kpis"><div class="kpi"><div class="n">'+active.length+'</div><div class="l">'+t.active+'</div></div><div class="kpi"><div class="n">'+ts.filter(function(x){return x.status==='done';}).length+'</div><div class="l">'+t.done+'</div></div></div><div class="card">'+active.map(function(x){var pr=parseInt(x.priority,10);if(!(pr>=1&&pr<=3))pr=2;return '<div class="row"><span class="pri p'+pr+'">P'+pr+'</span><span class="own">'+esc(x.owner)+'</span><span class="chip cat">'+esc(x.stream)+'</span><span style="flex:1">'+esc(x.title)+'</span>'+(x.deadline?'<span class="mono">'+esc(x.deadline)+'</span>':'')+'<button class="btn ghost" title="'+(t.markdone||'done')+'" style="padding:1px 9px;font-size:12px;line-height:1.4" onclick="event.stopPropagation();act(\'task.done\',{id:'+x.id+'})">✓</button></div>';}).join('')+'</div>';}
 async function renderActivity(v){var log=await j('/log'),tr=await j('/traces'),rc=await j('/root-cause');
  var rcCard='<div class="card"><div class="k">'+t.rootcause+'</div>';
  if(rc.likelyCulprit){rcCard+='<div style="margin-bottom:8px"><span class="muted">'+t.culprit+': </span><span class="opname">'+esc(rc.likelyCulprit.operation)+'</span> <span class="muted">('+rc.failingTraces+'/'+rc.totalTraces+' failing)</span></div>'+

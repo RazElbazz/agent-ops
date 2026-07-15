@@ -14,7 +14,7 @@ import { rmSync } from 'node:fs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const PORT = 8799
-const BASE = `http://localhost:${PORT}`
+const BASE = `http://127.0.0.1:${PORT}`
 const DB = join(tmpdir(), `agent-ops-demo-${process.pid}.db`)
 const env = { ...process.env, AGENT_OPS_DB: DB, PORT: String(PORT) }
 const node = process.execPath

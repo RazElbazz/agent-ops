@@ -6,7 +6,7 @@
 //   node cli.mjs kn [category] [query]
 //   node cli.mjs tasks
 //   node cli.mjs do <action> '<json-payload>'      e.g. do task.add '{"title":"hi","owner":"me","priority":1}'
-const BASE = process.env.AGENT_OPS || 'http://localhost:8791'
+const BASE = process.env.AGENT_OPS || 'http://127.0.0.1:8791'
 const [, , cmd, a, b] = process.argv
 const get = async p => (await fetch(BASE + p)).json()
 const post = async (action, payload) => (await fetch(BASE + '/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, payload, chat: 'cli' }) })).json()

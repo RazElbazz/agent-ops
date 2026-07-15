@@ -3,7 +3,7 @@
 //           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|update|done|del · knowledge.set|del · op.set|del · component.set|del
-//                    record.add|del · trace.add · ui.set · import.bundle
+//                    record.add|del · trace.add · ui.set|del · import.bundle
 // Run:  node server.mjs   (if node:sqlite asks for a flag: node --experimental-sqlite server.mjs)
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -43,9 +43,9 @@ const ACTIONS = {
       const r = run('INSERT INTO knowledge (category,key,value,tags,updated_at) VALUES (?,?,?,?,?)', [p.category, p.key, p.value, p.tags || '', nowISO()]); return { id: Number(r.lastInsertRowid) } },
   'op.set': p => { const ex = get('SELECT version FROM operations WHERE name=?', [p.name]); const ver = ex ? ex.version + 1 : 1;
       run('INSERT INTO operations (name,category,summary,prompt,deps,version,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,summary=excluded.summary,prompt=excluded.prompt,deps=excluded.deps,version=excluded.version,updated_at=excluded.updated_at',
-        [p.name, p.category || '', p.summary || '', p.prompt || '', JSON.stringify(p.deps || []), ver, nowISO()]); return { name: p.name, version: ver } },
+        [p.name, p.category || '', p.summary || '', p.prompt || '', JSON.stringify(asArr(p.deps)), ver, nowISO()]); return { name: p.name, version: ver } },
   'component.set': p => { run('INSERT INTO components (name,category,description,operations,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,description=excluded.description,operations=excluded.operations,updated_at=excluded.updated_at',
-        [p.name, p.category || '', p.description || '', JSON.stringify(p.operations || []), nowISO()]); return { name: p.name } },
+        [p.name, p.category || '', p.description || '', JSON.stringify(asArr(p.operations)), nowISO()]); return { name: p.name } },
   'record.add': p => { const r = run('INSERT INTO records (component,type,data,created) VALUES (?,?,?,?)', [p.component, p.type || '', JSON.stringify(p.data || {}), today()]); return { id: Number(r.lastInsertRowid) } },
   'trace.add': p => { const r = run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note) VALUES (?,?,?,?,?,?,?,?)',
       [nowISO(), p.chat || '', p.op || '', JSON.stringify(p.chain || []), JSON.stringify(p.input ?? null), JSON.stringify(p.output ?? null), p.status || '', p.note || '']); return { id: Number(r.lastInsertRowid) } },
@@ -54,18 +54,33 @@ const ACTIONS = {
   'op.del': p => { run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true } },
   'component.del': p => { run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true } },
   'record.del': p => { run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true } },
+  'ui.del': p => { run('DELETE FROM ui WHERE key=?', [p.key]); return { ok: true } },
   // Import a shared system definition (from GET /export). Upserts ops/components/knowledge/ui in one
-  // transaction (each op.set bumps its version). Partial-safe: invalid items are skipped and reported
-  // (with the same field requirements as the individual actions), so one bad row can't abort the whole import.
+  // transaction (each op.set bumps its version). Truly partial-safe: each item is type-validated and
+  // wrapped in its own try/catch, so one bad row is skipped-and-reported, never aborting the whole import.
   'import.bundle': p => { const n = { operations: 0, components: 0, knowledge: 0, ui: 0 }, skipped = []
-    for (const o of (p.operations || [])) { if (o && o.name) { ACTIONS['op.set'](o); n.operations++ } else skipped.push({ type: 'operation', reason: 'missing name', item: o }) }
-    for (const c of (p.components || [])) { if (c && c.name) { ACTIONS['component.set'](c); n.components++ } else skipped.push({ type: 'component', reason: 'missing name', item: c }) }
-    for (const k of (p.knowledge || [])) { if (k && k.category && k.key && k.value != null) { ACTIONS['knowledge.set'](k); n.knowledge++ } else skipped.push({ type: 'knowledge', reason: 'missing category/key/value', item: k }) }
-    if (p.ui && typeof p.ui === 'object') for (const [key, value] of Object.entries(p.ui)) { ACTIONS['ui.set']({ key, value }); n.ui++ }
+    const imp = (kind, action, items) => { for (const item of asArr(items)) { const msg = (!item || typeof item !== 'object' || Array.isArray(item)) ? 'not an object' : (validate[action] ? validate[action](item) : null); if (msg) { skipped.push({ type: kind, reason: msg, item }); continue } try { ACTIONS[action](item); n[kind]++ } catch (e) { skipped.push({ type: kind, reason: String(e.message || e), item }) } } }
+    imp('operations', 'op.set', p.operations)
+    imp('components', 'component.set', p.components)
+    imp('knowledge', 'knowledge.set', p.knowledge)
+    if (p.ui && typeof p.ui === 'object' && !Array.isArray(p.ui)) for (const [key, value] of Object.entries(p.ui)) { try { ACTIONS['ui.set']({ key, value }); n.ui++ } catch (e) { skipped.push({ type: 'ui', reason: String(e.message || e), item: { key } }) } }
     return skipped.length ? { ...n, skipped } : n },
 }
 
-const send = (res, code, obj) => { const h = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }; if (CORS) { h['Access-Control-Allow-Origin'] = CORS; h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'; h['Access-Control-Allow-Headers'] = 'Content-Type' } res.writeHead(code, h); res.end(JSON.stringify(obj)) }
+const send = (res, code, obj) => { if (res.headersSent || res.writableEnded) return; const h = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }; if (CORS) { h['Access-Control-Allow-Origin'] = CORS; h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'; h['Access-Control-Allow-Headers'] = 'Content-Type' } res.writeHead(code, h); res.end(JSON.stringify(obj)) }
+const asArr = x => Array.isArray(x) ? x : []
+// Per-action type checks: reject a payload whose bound fields are the wrong type with a clean 400
+// (instead of a 500 at SQLite bind time). ui.set.value is intentionally any-typed.
+const validate = {
+  'task.add': p => typeof p.title !== 'string' ? 'title must be a string' : null,
+  'knowledge.set': p => (typeof p.category !== 'string' || typeof p.key !== 'string') ? 'category and key must be strings' : typeof p.value !== 'string' ? 'value must be a string' : null,
+  'op.set': p => typeof p.name !== 'string' ? 'name must be a string' : (p.deps != null && !Array.isArray(p.deps)) ? 'deps must be an array' : null,
+  'component.set': p => typeof p.name !== 'string' ? 'name must be a string' : (p.operations != null && !Array.isArray(p.operations)) ? 'operations must be an array' : null,
+  'record.add': p => typeof p.component !== 'string' ? 'component must be a string' : null,
+  'trace.add': p => typeof p.op !== 'string' ? 'op must be a string' : null,
+  'ui.set': p => typeof p.key !== 'string' ? 'key must be a string' : null,
+  'ui.del': p => typeof p.key !== 'string' ? 'key must be a string' : null,
+}
 // Read the whole body first; only classify AFTER parsing. A non-object JSON (null, 5, "x", []) is __bad,
 // so the /action handler never dereferences a non-object payload.
 async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 2_000_000) return { __oversize: true } } try { const v = JSON.parse(b || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : { __bad: true } } catch { return { __bad: true } } }
@@ -75,16 +90,16 @@ const REQUIRED = {
   'task.add': ['title'], 'task.update': ['id'], 'task.done': ['id'], 'task.del': ['id'],
   'knowledge.set': ['category', 'key', 'value'], 'knowledge.del': ['id'],
   'op.set': ['name'], 'op.del': ['name'], 'component.set': ['name'], 'component.del': ['name'],
-  'record.add': ['component'], 'record.del': ['id'], 'trace.add': ['op'], 'ui.set': ['key'],
+  'record.add': ['component'], 'record.del': ['id'], 'trace.add': ['op'], 'ui.set': ['key'], 'ui.del': ['key'],
 }
-const opRow = r => r ? ({ ...r, deps: safeJSON(r.deps, []) }) : null
+const opRow = r => r ? ({ ...r, deps: asArr(safeJSON(r.deps, [])) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
 
 // Graph integrity: catch a broken operation graph before it bites at runtime.
 function lint() {
-  const ops = all('SELECT name,deps FROM operations').map(o => ({ name: o.name, deps: safeJSON(o.deps, []) }))
+  const ops = all('SELECT name,deps FROM operations').map(o => ({ name: o.name, deps: asArr(safeJSON(o.deps, [])) }))
   const names = new Set(ops.map(o => o.name))
-  const comps = all('SELECT name,operations FROM components').map(c => ({ name: c.name, operations: safeJSON(c.operations, []) }))
+  const comps = all('SELECT name,operations FROM components').map(c => ({ name: c.name, operations: asArr(safeJSON(c.operations, [])) }))
   const missingDeps = [], danglingComponentOps = []
   for (const o of ops) for (const d of o.deps) if (!names.has(d)) missingDeps.push({ operation: o.name, missingDep: d })
   for (const c of comps) for (const op of c.operations) if (!names.has(op)) danglingComponentOps.push({ component: c.name, missingOp: op })
@@ -146,7 +161,7 @@ function rootCause(opFilter) {
 const server = createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x'); const p = u.pathname; const q = u.searchParams
-    if (req.method === 'OPTIONS') return send(res, 204, {})
+    if (req.method === 'OPTIONS') { const h = {}; if (CORS) { h['Access-Control-Allow-Origin'] = CORS; h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'; h['Access-Control-Allow-Headers'] = 'Content-Type' } res.writeHead(204, h); return res.end() }
 
     // static UI — readFile FIRST, then writeHead. (Writing the header before awaiting readFile means a
     // missing file rejects after headers are already sent, and the catch's second writeHead crashes the process.)
@@ -172,8 +187,8 @@ const server = createServer(async (req, res) => {
     if (p === '/ui' && req.method === 'GET') { const rows = all('SELECT key,value FROM ui'); const o = {}; for (const r of rows) o[r.key] = safeJSON(r.value, r.value); return send(res, 200, o) }
     if (p === '/ops' && req.method === 'GET') return send(res, 200, all('SELECT name,category,summary,version FROM operations ORDER BY category,name'))
     if (p.startsWith('/op/') && req.method === 'GET') { const name = safeDecode(p.slice(4)); const o = name == null ? null : opRow(get('SELECT * FROM operations WHERE name=?', [name])); return o ? send(res, 200, o) : send(res, 404, { error: 'no such operation' }) }
-    if (p === '/components' && req.method === 'GET') return send(res, 200, all('SELECT * FROM components ORDER BY category,name').map(c => ({ ...c, operations: safeJSON(c.operations, []) })))
-    if (p.startsWith('/component/') && req.method === 'GET') { const name = safeDecode(p.slice(11)); const c = name == null ? null : get('SELECT * FROM components WHERE name=?', [name]); return c ? send(res, 200, { ...c, operations: safeJSON(c.operations, []) }) : send(res, 404, { error: 'no such component' }) }
+    if (p === '/components' && req.method === 'GET') return send(res, 200, all('SELECT * FROM components ORDER BY category,name').map(c => ({ ...c, operations: asArr(safeJSON(c.operations, [])) })))
+    if (p.startsWith('/component/') && req.method === 'GET') { const name = safeDecode(p.slice(11)); const c = name == null ? null : get('SELECT * FROM components WHERE name=?', [name]); return c ? send(res, 200, { ...c, operations: asArr(safeJSON(c.operations, [])) }) : send(res, 404, { error: 'no such component' }) }
     if (p === '/knowledge' && req.method === 'GET') {
       const cat = q.get('category'), term = q.get('q'), tag = q.get('tag'); const w = [], v = []
       if (cat) { w.push('category=?'); v.push(cat) } if (tag) { w.push('tags LIKE ?'); v.push('%' + tag + '%') }
@@ -189,8 +204,8 @@ const server = createServer(async (req, res) => {
     if (p === '/stats' && req.method === 'GET') return send(res, 200, stats())
     if (p === '/export' && req.method === 'GET') return send(res, 200, {
       exportedFrom: 'agent-ops', schema: 1,
-      operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: safeJSON(o.deps, []) })),
-      components: all('SELECT name,category,description,operations FROM components ORDER BY category,name').map(c => ({ ...c, operations: safeJSON(c.operations, []) })),
+      operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: asArr(safeJSON(o.deps, [])) })),
+      components: all('SELECT name,category,description,operations FROM components ORDER BY category,name').map(c => ({ ...c, operations: asArr(safeJSON(c.operations, [])) })),
       knowledge: all('SELECT category,key,value,tags FROM knowledge ORDER BY category,key'),
       ui: (() => { const o = {}; for (const r of all('SELECT key,value FROM ui')) o[r.key] = safeJSON(r.value, r.value); return o })(),
     })
@@ -213,6 +228,8 @@ const server = createServer(async (req, res) => {
       const fn = ACTIONS[action]; if (!fn) return send(res, 400, { error: 'unknown action: ' + action, known: Object.keys(ACTIONS) })
       const missing = (REQUIRED[action] || []).filter(k => payload[k] === undefined || payload[k] === null || payload[k] === '')
       if (missing.length) return send(res, 400, { error: 'missing required field(s): ' + missing.join(', '), action, required: REQUIRED[action] })
+      const badType = validate[action] && validate[action](payload)
+      if (badType) return send(res, 400, { error: badType, action })
       try {
         // Mutation + its audit-log row are ONE atomic unit: if the log write fails, the mutation rolls
         // back too, so a 500 never hides a write that actually happened (which would invite a double-apply).
