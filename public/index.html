@@ -45,6 +45,7 @@ var UI={title:'agent-ops',lang:'en',tabs:['overview','operations','knowledge','t
 function tab(x){cur=x;try{location.hash=x;}catch(e){}render();}
 async function j(u){var r=await fetch(u);return r.json();}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escAttr(s){return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function toast(m){var e=document.getElementById('toast');e.textContent=m;e.classList.add('on');setTimeout(function(){e.classList.remove('on');},1800);}
 async function act(action,payload){try{var r=await fetch('/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action,payload:payload||{},chat:'ui'})});var jr=await r.json();toast(jr.ok?(action+' ✓'):(jr.error||'error'));render();}catch(e){toast('error: '+e.message);}}
 async function boot(){
@@ -92,7 +93,7 @@ function setOpMode(m){_opmode=m;var a=document.getElementById('mList'),b=documen
 function drawOps(){if(_opmode==='map')return drawMap();
  var q=(document.getElementById('opq')&&document.getElementById('opq').value||'').toLowerCase();
  var list=_ops.filter(function(o){return !q||(o.name+' '+o.category+' '+(o.summary||'')).toLowerCase().indexOf(q)>=0;});
- document.getElementById('opres').innerHTML=list.map(function(o){return '<div class="card op" onclick="showOp(\''+o.name+'\',this)"><div class="opname">'+esc(o.name)+' <span class="chip cat">'+esc(o.category)+'</span> <span class="muted">v'+o.version+'</span></div><div class="opsum">'+esc(o.summary)+'</div><div class="opbody"></div></div>';}).join('')||'<div class="card muted">'+(_ops.length?t.empty:'no operations, run <b>node seed.mjs</b>')+'</div>';}
+ document.getElementById('opres').innerHTML=list.map(function(o){return '<div class="card op" data-op="'+escAttr(o.name)+'" onclick="showOp(this)"><div class="opname">'+esc(o.name)+' <span class="chip cat">'+esc(o.category)+'</span> <span class="muted">v'+o.version+'</span></div><div class="opsum">'+esc(o.summary)+'</div><div class="opbody"></div></div>';}).join('')||'<div class="card muted">'+(_ops.length?t.empty:'no operations, run <b>node seed.mjs</b>')+'</div>';}
 async function drawMap(){if(!_exp)_exp=await j('/export');
  var byName={};(_exp.operations||[]).forEach(function(o){byName[o.name]=o;});
  var depSet={};(_exp.operations||[]).forEach(function(o){(o.deps||[]).forEach(function(d){depSet[d]=1;});});
@@ -103,9 +104,9 @@ async function drawMap(){if(!_exp)_exp=await j('/export');
   var h='<div style="'+pad+';padding-top:3px;padding-bottom:3px">'+(depth?'<span class="muted">↳ </span>':'')+'<span class="chip">'+esc(name)+'</span> <span class="muted">'+esc(op?(op.summary||''):'?')+'</span></div>';
   if(op&&op.deps)op.deps.forEach(function(d){h+=node(d,depth+1,s);});return h;}
  document.getElementById('opres').innerHTML='<div class="card"><div class="muted" style="margin-bottom:6px">'+t.roots+'</div>'+(roots.length?roots.map(function(r){return node(r.name,0,{});}).join('<hr style="border:none;border-top:1px solid var(--rule);margin:8px 0">'):'<span class="muted">'+t.empty+'</span>')+'</div>';}
-async function showOp(name,el){var b=el.querySelector('.opbody');if(b.innerHTML){b.innerHTML='';return;}var o=await j('/op/'+encodeURIComponent(name));b.innerHTML='<pre>'+esc(o.prompt)+'</pre>'+(o.deps&&o.deps.length?'<div style="margin-top:6px">'+t.needs+': '+o.deps.map(function(d){return '<span class="chip">'+esc(d)+'</span>';}).join('')+'</div>':'');}
+async function showOp(el){var name=el.getAttribute('data-op');var b=el.querySelector('.opbody');if(b.innerHTML){b.innerHTML='';return;}var o=await j('/op/'+encodeURIComponent(name));b.innerHTML='<pre>'+esc(o.prompt)+'</pre>'+(o.deps&&o.deps.length?'<div style="margin-top:6px">'+t.needs+': '+o.deps.map(function(d){return '<span class="chip">'+esc(d)+'</span>';}).join('')+'</div>':'');}
 async function renderKnowledge(v){var cats=(M&&M.knowledgeCategories)||[];
- v.innerHTML='<div class="card"><span class="muted">'+t.category+': </span><select id="kcat" onchange="loadK()"><option value="">*</option>'+cats.map(function(c){return '<option value="'+esc(c.category)+'">'+esc(c.category)+' ('+c.n+')</option>';}).join('')+'</select> <input id="kq" placeholder="'+t.search+'" oninput="loadK()"></div><div id="kres"></div>';loadK();}
+ v.innerHTML='<div class="card"><span class="muted">'+t.category+': </span><select id="kcat" onchange="loadK()"><option value="">*</option>'+cats.map(function(c){return '<option value="'+escAttr(c.category)+'">'+esc(c.category)+' ('+c.n+')</option>';}).join('')+'</select> <input id="kq" placeholder="'+t.search+'" oninput="loadK()"></div><div id="kres"></div>';loadK();}
 async function loadK(){var cat=document.getElementById('kcat').value,q=document.getElementById('kq').value;var rows=await j('/knowledge?'+(cat?'category='+encodeURIComponent(cat):'')+(q?'&q='+encodeURIComponent(q):''));
  document.getElementById('kres').innerHTML=rows.map(function(r){return '<div class="card"><div class="k">'+esc(r.category)+' · '+esc(r.key)+'</div><div class="opsum">'+esc(r.value)+'</div></div>';}).join('')||'<div class="muted">'+t.empty+'</div>';}
 async function renderTasks(v){var ts=await j('/tasks');var active=ts.filter(function(x){return x.status!=='done';});
