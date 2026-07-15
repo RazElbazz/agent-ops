@@ -1,0 +1,76 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent-ops · explorer</title>
+<style>
+ :root{--bg:#eef0f3;--panel:#fff;--ink:#181b20;--ink2:#434955;--muted:#727a86;--faint:#9aa1ac;--rule:#e7e9ee;
+  --accent:#1f3b63;--accent2:#2f5f8a;--accent-soft:#eef3f9;--do:#0f6e57;--p1:#c0392b;--p2:#b7791f;--p3:#7a828e;--sans:'Segoe UI',-apple-system,Arial,sans-serif;--mono:'SF Mono',Consolas,monospace;}
+ *{box-sizing:border-box;}html,body{margin:0;}body{background:var(--bg);font-family:var(--sans);color:var(--ink);font-size:14px;}
+ .wrap{max-width:1040px;margin:0 auto;padding:22px 18px 60px;}
+ .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--accent2);}
+ h1{font-size:24px;font-weight:800;margin:2px 0 2px;} .sub{color:var(--muted);font-size:12.5px;}
+ .tabs{display:flex;gap:6px;margin:16px 0;flex-wrap:wrap;}
+ .tab{border:1px solid var(--rule);background:var(--panel);color:var(--ink2);border-radius:20px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;}
+ .tab.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+ .card{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:9px;}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+ .k{font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--accent);text-transform:uppercase;margin-bottom:8px;}
+ .chip{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:2px 9px;margin:2px 3px 2px 0;background:var(--accent-soft);color:var(--accent);}
+ .chip.cat{background:#f0f1f5;color:var(--muted);}
+ .op{cursor:pointer;} .op:hover{border-color:var(--accent2);}
+ .opname{font-weight:800;color:var(--accent);font-size:15px;} .opsum{color:var(--ink2);font-size:13px;margin-top:2px;}
+ pre{background:#f7f8fa;border:1px solid var(--rule);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;color:var(--ink2);margin:8px 0 0;}
+ .kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+ .kpi{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:9px 15px;text-align:center;min-width:80px;}
+ .kpi .n{font-size:21px;font-weight:800;} .kpi .l{font-size:10.5px;color:var(--muted);}
+ select,input{border:1px solid var(--rule);border-radius:8px;padding:7px 11px;font-family:inherit;font-size:13px;}
+ .row{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid #f1f2f6;}
+ .pri{font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 6px;} .pri.p1{background:#fbecea;color:var(--p1);} .pri.p2{background:#fbf3e0;color:var(--p2);} .pri.p3{background:#eef0f3;color:var(--p3);}
+ .own{font-size:11px;font-weight:700;border-radius:20px;padding:1px 8px;background:#f0f1f5;color:var(--muted);} .own.raz{background:#e5f4ef;color:var(--do);}
+ .muted{color:var(--muted);font-size:12.5px;} .mono{font-family:var(--mono);font-size:12px;color:var(--muted);}
+</style></head><body><div class="wrap">
+ <div class="eyebrow">agent-ops · explorer</div><h1 id="title">מרכז-הבקרה</h1><div class="sub" id="sub">טוען...</div>
+ <div class="tabs" id="tabs"></div>
+ <div id="view"></div>
+</div>
+<script>
+var TABS=[['overview','סקירה'],['operations','פעולות'],['knowledge','ידע'],['tasks','משימות'],['activity','פעילות']];
+var cur='overview',M=null;
+function tab(t){cur=t;render();}
+async function j(u){var r=await fetch(u);return r.json();}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function boot(){try{M=await j('/manifest');document.getElementById('sub').textContent=M.operations.length+' פעולות · '+M.components.length+' רכיבים · '+M.knowledgeCategories.length+' קטגוריות-ידע';}catch(e){document.getElementById('sub').textContent='אין חיבור לשרת. הרץ: node server.mjs';}
+ document.getElementById('tabs').innerHTML=TABS.map(function(t){return '<button class="tab'+(cur===t[0]?' on':'')+'" onclick="tab(\''+t[0]+'\')">'+t[1]+'</button>';}).join('');render();}
+async function render(){
+ document.getElementById('tabs').querySelectorAll('.tab').forEach(function(b,i){b.className='tab'+(TABS[i][0]===cur?' on':'');});
+ var v=document.getElementById('view');v.innerHTML='<div class="muted">טוען...</div>';
+ if(cur==='overview')return renderOverview(v);
+ if(cur==='operations')return renderOps(v);
+ if(cur==='knowledge')return renderKnowledge(v);
+ if(cur==='tasks')return renderTasks(v);
+ if(cur==='activity')return renderActivity(v);
+}
+function renderOverview(v){if(!M){v.innerHTML='<div class="card">אין חיבור. הרץ <b>node server.mjs</b>.</div>';return;}
+ var byCat={};M.components.forEach(function(c){(byCat[c.category]=byCat[c.category]||[]).push(c);});
+ var h='<div class="kpis"><div class="kpi"><div class="n">'+M.operations.length+'</div><div class="l">פעולות</div></div><div class="kpi"><div class="n">'+M.components.length+'</div><div class="l">רכיבים</div></div><div class="kpi"><div class="n">'+(M.counts.tasks)+'</div><div class="l">משימות</div></div><div class="kpi"><div class="n">'+(M.counts.records)+'</div><div class="l">רשומות</div></div></div>';
+ h+='<div class="card"><div class="k">הפרוטוקול</div><pre>'+esc(M.protocol)+'</pre></div>';
+ h+='<div class="grid">';
+ Object.keys(byCat).forEach(function(cat){h+='<div class="card"><div class="k">'+esc(cat)+'</div>'+byCat[cat].map(function(c){return '<div style="margin-bottom:7px"><b>'+esc(c.name)+'</b> <span class="muted">'+esc(c.description||'')+'</span></div>';}).join('')+'</div>';});
+ h+='</div>';v.innerHTML=h;}
+async function renderOps(v){var ops=await j('/ops');var h='';
+ for(var i=0;i<ops.length;i++){var o=ops[i];h+='<div class="card op" onclick="showOp(\''+o.name+'\',this)"><div class="opname">'+esc(o.name)+' <span class="chip cat">'+esc(o.category)+'</span> <span class="muted">v'+o.version+'</span></div><div class="opsum">'+esc(o.summary)+'</div><div class="opbody"></div></div>';}
+ v.innerHTML=h||'<div class="card">אין פעולות. הרץ <b>node seed.mjs</b>.</div>';}
+async function showOp(name,el){var b=el.querySelector('.opbody');if(b.innerHTML){b.innerHTML='';return;}var o=await j('/op/'+encodeURIComponent(name));
+ b.innerHTML='<pre>'+esc(o.prompt)+'</pre>'+(o.deps&&o.deps.length?'<div style="margin-top:6px">צריך: '+o.deps.map(function(d){return '<span class="chip">'+esc(d)+'</span>';}).join('')+'</div>':'');}
+async function renderKnowledge(v){var cats=(M&&M.knowledgeCategories)||[];
+ var h='<div class="card"><span class="muted">קטגוריה: </span><select id="kcat" onchange="loadK()"><option value="">הכל</option>'+cats.map(function(c){return '<option value="'+esc(c.category)+'">'+esc(c.category)+' ('+c.n+')</option>';}).join('')+'</select> <input id="kq" placeholder="חיפוש..." oninput="loadK()"></div><div id="kres"></div>';
+ v.innerHTML=h;loadK();}
+async function loadK(){var cat=document.getElementById('kcat').value,q=document.getElementById('kq').value;
+ var rows=await j('/knowledge?'+(cat?'category='+encodeURIComponent(cat):'')+(q?'&q='+encodeURIComponent(q):''));
+ document.getElementById('kres').innerHTML=rows.map(function(r){return '<div class="card"><div class="k">'+esc(r.category)+' · '+esc(r.key)+'</div><div class="opsum">'+esc(r.value)+'</div>'+(r.tags?'<div style="margin-top:5px">'+r.tags.split(',').filter(Boolean).map(function(t){return '<span class="chip cat">'+esc(t.trim())+'</span>';}).join('')+'</div>':'')+'</div>';}).join('')||'<div class="muted">אין תוצאות.</div>';}
+async function renderTasks(v){var ts=await j('/tasks');var active=ts.filter(function(t){return t.status!=='done';});
+ v.innerHTML='<div class="kpis"><div class="kpi"><div class="n">'+active.length+'</div><div class="l">פעילות</div></div><div class="kpi"><div class="n">'+ts.filter(function(t){return t.status==='done';}).length+'</div><div class="l">הושלמו</div></div></div>'+
+  '<div class="card">'+active.map(function(t){return '<div class="row"><span class="pri p'+(t.priority||2)+'">P'+(t.priority||2)+'</span><span class="own '+(t.owner==='raz'?'raz':'')+'">'+esc(t.owner)+'</span><span class="chip cat">'+esc(t.stream)+'</span><span style="flex:1">'+esc(t.title)+'</span>'+(t.deadline?'<span class="mono">'+esc(t.deadline)+'</span>':'')+'</div>';}).join('')+'</div>';}
+async function renderActivity(v){var log=await j('/log'),tr=await j('/traces');
+ v.innerHTML='<div class="card"><div class="k">יומן-פעולות (audit)</div>'+(log.length?log.slice(0,40).map(function(a){return '<div class="row"><span class="mono">'+esc((a.ts||'').slice(11,16))+'</span><span class="chip">'+esc(a.action)+'</span><span class="muted" style="flex:1">'+esc((a.payload||'').slice(0,80))+'</span></div>';}).join(''):'<div class="muted">אין עדיין. פעולות מגיעות דרך POST /action.</div>')+'</div>'+
+  '<div class="card"><div class="k">טרייסים (ל-root-cause)</div>'+(tr.length?tr.slice(0,20).map(function(t){return '<div class="row"><span class="chip">'+esc(t.op)+'</span><span class="chip cat">'+esc(t.status)+'</span><span class="muted" style="flex:1">'+esc(t.note||'')+'</span></div>';}).join(''):'<div class="muted">אין עדיין.</div>')+'</div>';}
+boot();
+</script></body></html>

@@ -1,0 +1,14 @@
+{
+  "name": "agent-ops",
+  "version": "0.1.0",
+  "description": "A self-describing, composable operation registry for AI agents. Every operation is a node carrying its own prompt and the operations it depends on (the edges); agents bootstrap from a manifest, pull only what a task needs, act via atomic transactions, and the system traces its chains so failures can be root-caused and the responsible operation improved. The engine is public; each user's data lives in a local, gitignored SQLite DB.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "seed": "node seed.mjs",
+    "reset": "node seed.mjs --reset"
+  },
+  "keywords": ["ai-agents", "operations", "prompt-registry", "composable", "self-describing", "sqlite", "mcp"],
+  "license": "MIT"
+}

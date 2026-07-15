@@ -1,0 +1,14 @@
+# The DATA is private and never committed. Only the ENGINE CODE is public.
+# All real/private data (knowledge, leads, pricing, tasks) lives in the local DB
+# and in local seed files, never in the repo.
+*.db
+*.db-wal
+*.db-shm
+*.local
+*.local.*
+seed.local.mjs
+/data/
+/private/
+node_modules/
+.DS_Store
+.env
