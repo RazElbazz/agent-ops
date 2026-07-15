@@ -39,8 +39,8 @@
  <div id="view"></div>
 </div><div id="toast"></div>
 <script>
-var L={en:{overview:'overview',operations:'operations',knowledge:'knowledge',tasks:'tasks',activity:'activity',protocol:'protocol',active:'active',done:'done',records:'records',components:'components',needs:'needs',noconn:'No connection. Run: node server.mjs',auditlog:'action log (audit)',traces:'traces (root-cause)',empty:'nothing yet',category:'category',search:'search...',rootcause:'root-cause',culprit:'likely culprit',nofails:'no failing chains logged, nothing to root-cause',filterops:'filter operations...',graphissues:'graph issues',missingdep:'missing dep',missingop:'missing op'},
-     he:{overview:'סקירה',operations:'פעולות',knowledge:'ידע',tasks:'משימות',activity:'פעילות',protocol:'הפרוטוקול',active:'פעילות',done:'הושלמו',records:'רשומות',components:'רכיבים',needs:'צריך',noconn:'אין חיבור. הרץ: node server.mjs',auditlog:'יומן-פעולות (audit)',traces:'טרייסים (root-cause)',empty:'אין עדיין',category:'קטגוריה',search:'חיפוש...',rootcause:'ניתוח-שורש',culprit:'החשוד המרכזי',nofails:'אין שרשראות-כושלות ביומן, אין מה לנתח',filterops:'סינון פעולות...',graphissues:'בעיות בגרף',missingdep:'תלות חסרה',missingop:'פעולה חסרה'}};
+var L={en:{overview:'overview',operations:'operations',knowledge:'knowledge',tasks:'tasks',activity:'activity',protocol:'protocol',active:'active',done:'done',records:'records',components:'components',needs:'needs',noconn:'No connection. Run: node server.mjs',auditlog:'action log (audit)',traces:'traces (root-cause)',empty:'nothing yet',category:'category',search:'search...',rootcause:'root-cause',culprit:'likely culprit',nofails:'no failing chains logged, nothing to root-cause',filterops:'filter operations...',graphissues:'graph issues',missingdep:'missing dep',missingop:'missing op',listview:'list',mapview:'map',roots:'entry points (not used as a dependency)',cycle:'cycle'},
+     he:{overview:'סקירה',operations:'פעולות',knowledge:'ידע',tasks:'משימות',activity:'פעילות',protocol:'הפרוטוקול',active:'פעילות',done:'הושלמו',records:'רשומות',components:'רכיבים',needs:'צריך',noconn:'אין חיבור. הרץ: node server.mjs',auditlog:'יומן-פעולות (audit)',traces:'טרייסים (root-cause)',empty:'אין עדיין',category:'קטגוריה',search:'חיפוש...',rootcause:'ניתוח-שורש',culprit:'החשוד המרכזי',nofails:'אין שרשראות-כושלות ביומן, אין מה לנתח',filterops:'סינון פעולות...',graphissues:'בעיות בגרף',missingdep:'תלות חסרה',missingop:'פעולה חסרה',listview:'רשימה',mapview:'מפה',roots:'נקודות-כניסה (לא בשימוש כתלות)',cycle:'מעגל'}};
 var UI={title:'agent-ops',lang:'en',tabs:['overview','operations','knowledge','tasks','activity'],buttons:[]},M=null,cur='overview',t=L.en;
 function tab(x){cur=x;try{location.hash=x;}catch(e){}render();}
 async function j(u){var r=await fetch(u);return r.json();}
@@ -80,11 +80,29 @@ async function renderOverview(v){if(!M){v.innerHTML='<div class="card">'+t.nocon
  Object.keys(byCat).forEach(function(cat){h+='<div class="card"><div class="k">'+esc(cat)+'</div>'+byCat[cat].map(function(c){return '<div style="margin-bottom:7px"><b>'+esc(c.name)+'</b> <span class="muted">'+esc(c.description||'')+'</span></div>';}).join('')+'</div>';});
  v.innerHTML=h+'</div>';
  try{var l=await j('/lint');if(l&&!l.ok){var w='<div class="card" style="border-color:var(--p1)"><div class="k" style="color:var(--p1)">⚠ '+(t.graphissues||'graph issues')+'</div>'+l.missingDeps.map(function(m){return '<div class="row"><span class="chip">'+esc(m.operation)+'</span><span class="muted" style="flex:1">'+(t.missingdep||'missing dep')+': '+esc(m.missingDep)+'</span></div>';}).join('')+l.danglingComponentOps.map(function(d){return '<div class="row"><span class="chip">'+esc(d.component)+'</span><span class="muted" style="flex:1">'+(t.missingop||'missing op')+': '+esc(d.missingOp)+'</span></div>';}).join('')+'</div>';v.insertAdjacentHTML('afterbegin',w);}}catch(e){}}
-var _ops=[];
-async function renderOps(v){_ops=await j('/ops');v.innerHTML='<div class="card"><input id="opq" placeholder="'+t.filterops+'" oninput="drawOps()" style="width:100%"></div><div id="opres"></div>';drawOps();}
-function drawOps(){var q=(document.getElementById('opq')&&document.getElementById('opq').value||'').toLowerCase();
+var _ops=[],_opmode='list',_exp=null;
+async function renderOps(v){_ops=await j('/ops');
+ v.innerHTML='<div class="card" style="display:flex;gap:8px;align-items:center">'
+  +'<input id="opq" placeholder="'+t.filterops+'" style="flex:1" oninput="if(_opmode===\'list\')drawOps()">'
+  +'<button id="mList" class="tab" onclick="setOpMode(\'list\')">'+t.listview+'</button>'
+  +'<button id="mMap" class="tab" onclick="setOpMode(\'map\')">'+t.mapview+'</button></div><div id="opres"></div>';
+ setOpMode(_opmode);}
+function setOpMode(m){_opmode=m;var a=document.getElementById('mList'),b=document.getElementById('mMap');
+ if(a)a.className='tab'+(m==='list'?' on':'');if(b)b.className='tab'+(m==='map'?' on':'');drawOps();}
+function drawOps(){if(_opmode==='map')return drawMap();
+ var q=(document.getElementById('opq')&&document.getElementById('opq').value||'').toLowerCase();
  var list=_ops.filter(function(o){return !q||(o.name+' '+o.category+' '+(o.summary||'')).toLowerCase().indexOf(q)>=0;});
  document.getElementById('opres').innerHTML=list.map(function(o){return '<div class="card op" onclick="showOp(\''+o.name+'\',this)"><div class="opname">'+esc(o.name)+' <span class="chip cat">'+esc(o.category)+'</span> <span class="muted">v'+o.version+'</span></div><div class="opsum">'+esc(o.summary)+'</div><div class="opbody"></div></div>';}).join('')||'<div class="card muted">'+(_ops.length?t.empty:'no operations, run <b>node seed.mjs</b>')+'</div>';}
+async function drawMap(){if(!_exp)_exp=await j('/export');
+ var byName={};(_exp.operations||[]).forEach(function(o){byName[o.name]=o;});
+ var depSet={};(_exp.operations||[]).forEach(function(o){(o.deps||[]).forEach(function(d){depSet[d]=1;});});
+ var roots=(_exp.operations||[]).filter(function(o){return !depSet[o.name];});
+ function node(name,depth,seen){var pad='padding-inline-start:'+(depth*20)+'px';
+  if(seen[name])return '<div style="'+pad+'" class="muted">↳ '+esc(name)+' ('+t.cycle+')</div>';
+  var s={};for(var k in seen)s[k]=1;s[name]=1;var op=byName[name];
+  var h='<div style="'+pad+';padding-top:3px;padding-bottom:3px">'+(depth?'<span class="muted">↳ </span>':'')+'<span class="chip">'+esc(name)+'</span> <span class="muted">'+esc(op?(op.summary||''):'?')+'</span></div>';
+  if(op&&op.deps)op.deps.forEach(function(d){h+=node(d,depth+1,s);});return h;}
+ document.getElementById('opres').innerHTML='<div class="card"><div class="muted" style="margin-bottom:6px">'+t.roots+'</div>'+(roots.length?roots.map(function(r){return node(r.name,0,{});}).join('<hr style="border:none;border-top:1px solid var(--rule);margin:8px 0">'):'<span class="muted">'+t.empty+'</span>')+'</div>';}
 async function showOp(name,el){var b=el.querySelector('.opbody');if(b.innerHTML){b.innerHTML='';return;}var o=await j('/op/'+encodeURIComponent(name));b.innerHTML='<pre>'+esc(o.prompt)+'</pre>'+(o.deps&&o.deps.length?'<div style="margin-top:6px">'+t.needs+': '+o.deps.map(function(d){return '<span class="chip">'+esc(d)+'</span>';}).join('')+'</div>':'');}
 async function renderKnowledge(v){var cats=(M&&M.knowledgeCategories)||[];
  v.innerHTML='<div class="card"><span class="muted">'+t.category+': </span><select id="kcat" onchange="loadK()"><option value="">*</option>'+cats.map(function(c){return '<option value="'+esc(c.category)+'">'+esc(c.category)+' ('+c.n+')</option>';}).join('')+'</select> <input id="kq" placeholder="'+t.search+'" oninput="loadK()"></div><div id="kres"></div>';loadK();}
