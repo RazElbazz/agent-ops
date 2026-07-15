@@ -28,10 +28,17 @@ op('outreach.batch', 'outreach', 'Full outreach batch: find, draft, output a wor
   ['lead.find', 'draft.message'])
 op('doc.render', 'core', 'Render a long output as a clean HTML page',
   'Render any long output as a clean, organized, self-contained HTML page per knowledge format.output. Save it locally and open it.')
+op('meeting.prep', 'sales', 'Prepare a one-page brief before a call',
+  'Given a company and a contact, produce a one-page prep: who they are, their likely pain, three questions to ask, and one relevant proof point. Use research.brief for the facts and mirror the tone in knowledge voice.tone.',
+  ['research.brief'])
+op('campaign.run', 'outreach', 'Run a full outreach campaign end to end',
+  'Run a campaign: outreach.batch to find leads and draft messages, then doc.render the worklist into a shareable page and add a follow-up task per lead. This composes lower-level operations (depth 3): campaign.run -> outreach.batch -> lead.find/draft.message.',
+  ['outreach.batch', 'doc.render'])
 
 // ---------- EXAMPLE COMPONENTS ----------
-comp('outreach', 'growth', 'Find leads and draft outreach messages', ['lead.find', 'draft.message', 'outreach.batch'])
+comp('outreach', 'growth', 'Find leads and draft outreach messages', ['lead.find', 'draft.message', 'outreach.batch', 'campaign.run'])
 comp('research', 'knowledge', 'Turn a topic into a verified brief', ['research.brief'])
+comp('sales', 'growth', 'Prepare for and run calls', ['meeting.prep'])
 comp('core', 'core', 'Core services: rendering, formatting', ['doc.render'])
 
 // ---------- EXAMPLE KNOWLEDGE (generic placeholders; put your real, private knowledge in seed.local.mjs) ----------
@@ -51,5 +58,14 @@ uiSet('buttons', [{ label: 'Add example task', action: 'task.add', payload: { ti
 if (get('SELECT COUNT(*) n FROM tasks').n === 0) {
   run('INSERT INTO tasks (title,owner,stream,priority,status,created) VALUES (?,?,?,?,?,?)', ['Example task, replace with your own via POST /action task.add', 'you', 'ops', 2, 'todo', today])
   console.log('seeded 1 example task')
+}
+
+// ---------- EXAMPLE TRACES (only when empty) so /root-cause + the Activity panel show something ----------
+if (get('SELECT COUNT(*) n FROM traces').n === 0) {
+  const trace = (op, chain, status, note) => run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note) VALUES (?,?,?,?,?,?,?,?)', [now, 'example', op, JSON.stringify(chain), 'null', 'null', status, note])
+  trace('campaign.run', ['outreach.batch', 'lead.find', 'draft.message'], 'fail', 'draft.message ignored voice.tone; messages read generic')
+  trace('outreach.batch', ['lead.find', 'draft.message'], 'error', 'draft.message produced generic copy again')
+  trace('research.brief', ['research.brief'], 'ok', 'cited brief shipped')
+  console.log('seeded 3 example traces (2 failing) — see GET /root-cause and the Activity tab')
 }
 console.log('seed done (generic examples only): ' + get('SELECT COUNT(*) n FROM operations').n + ' operations · ' + get('SELECT COUNT(*) n FROM components').n + ' components · ' + get('SELECT COUNT(*) n FROM knowledge').n + ' knowledge')
