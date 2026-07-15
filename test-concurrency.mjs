@@ -27,7 +27,7 @@ const get = (port, path) => fetch(`http://127.0.0.1:${port}${path}`).then(r => r
 async function main() {
   await new Promise((res, rej) => { const c = spawn(node, [FLAG, 'seed.mjs', '--reset'], { cwd: ROOT, env: env(PORTS[0]), stdio: 'ignore' }); c.on('exit', x => x === 0 ? res() : rej(new Error('seed exit ' + x))) })
   for (const p of PORTS) servers.push(spawn(node, [FLAG, 'server.mjs'], { cwd: ROOT, env: env(p), stdio: 'ignore' }))
-  for (const p of PORTS) { for (let i = 0; i < 40; i++) { try { if ((await get(p, '/health')).ok) break } catch {} await sleep(150) } }
+  for (const p of PORTS) { let up = false; for (let i = 0; i < 40; i++) { try { if ((await get(p, '/health')).ok) { up = true; break } } catch {} await sleep(150) } if (!up) throw new Error(`server on port ${p} failed to start (is the port already in use?)`) }
   console.log(`  (two server processes on ${PORTS.join(', ')} sharing one DB)`)
 
   const N = 40
@@ -54,7 +54,7 @@ async function main() {
 
 main().catch(e => { fail++; console.log('  ✗ threw: ' + e.message) }).finally(async () => {
   console.log(`\n${pass} passed, ${fail} failed`)
-  for (const s of servers) { try { await new Promise(res => { s.once('exit', res); try { s.kill() } catch { res() } }) } catch {} }
+  for (const s of servers) { try { await new Promise(res => { if (s.exitCode !== null || s.signalCode !== null) return res(); s.once('exit', res); try { s.kill() } catch { res() } setTimeout(res, 2000) }) } catch {} }
   for (let i = 0; i < 10; i++) { let left = false; for (const suf of ['', '-wal', '-shm']) { try { rmSync(DB + suf) } catch (e) { if (e.code !== 'ENOENT') left = true } } if (!left) break; await sleep(150) }
   process.exitCode = fail ? 1 : 0
 })

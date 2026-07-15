@@ -35,9 +35,9 @@ const PROTOCOL = [
 const ACTIONS = {
   'task.add': p => { const r = run('INSERT INTO tasks (title,owner,stream,priority,status,deadline,due_when,note,dep,created) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [p.title, p.owner || 'claude', p.stream || 'ops', p.priority || 2, 'todo', p.deadline || null, p.due_when || null, p.note || null, p.dep || null, today()]); return { id: Number(r.lastInsertRowid) } },
-  'task.update': p => { const f = [], v = []; for (const k of ['title', 'owner', 'stream', 'priority', 'status', 'deadline', 'due_when', 'note', 'dep']) if (k in p) { f.push(k + '=?'); v.push(p[k]) } if (!f.length) return { ok: true }; v.push(p.id); run('UPDATE tasks SET ' + f.join(',') + ' WHERE id=?', v); return { ok: true } },
-  'task.done': p => { run('UPDATE tasks SET status=?, done_on=? WHERE id=?', ['done', today(), p.id]); return { ok: true } },
-  'task.del': p => { run('DELETE FROM tasks WHERE id=?', [p.id]); return { ok: true } },
+  'task.update': p => { const f = [], v = []; for (const k of ['title', 'owner', 'stream', 'priority', 'status', 'deadline', 'due_when', 'note', 'dep']) if (k in p) { f.push(k + '=?'); v.push(p[k]) } if (!f.length) return { ok: true, changed: 0 }; v.push(p.id); const r = run('UPDATE tasks SET ' + f.join(',') + ' WHERE id=?', v); return { ok: true, changed: r.changes } },
+  'task.done': p => { const r = run('UPDATE tasks SET status=?, done_on=? WHERE id=?', ['done', today(), p.id]); return { ok: true, changed: r.changes } },
+  'task.del': p => { const r = run('DELETE FROM tasks WHERE id=?', [p.id]); return { ok: true, changed: r.changes } },
   'knowledge.set': p => { const ex = get('SELECT id FROM knowledge WHERE category=? AND key=?', [p.category, p.key]);
       if (ex) { run('UPDATE knowledge SET value=?, tags=?, updated_at=? WHERE id=?', [p.value, p.tags || '', nowISO(), ex.id]); return { id: ex.id, updated: true } }
       const r = run('INSERT INTO knowledge (category,key,value,tags,updated_at) VALUES (?,?,?,?,?)', [p.category, p.key, p.value, p.tags || '', nowISO()]); return { id: Number(r.lastInsertRowid) } },
@@ -50,11 +50,11 @@ const ACTIONS = {
   'trace.add': p => { const r = run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note) VALUES (?,?,?,?,?,?,?,?)',
       [nowISO(), p.chat || '', p.op || '', JSON.stringify(p.chain || []), JSON.stringify(p.input ?? null), JSON.stringify(p.output ?? null), p.status || '', p.note || '']); return { id: Number(r.lastInsertRowid) } },
   'ui.set': p => { run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [p.key, JSON.stringify(p.value === undefined ? null : p.value), nowISO()]); return { key: p.key } },
-  'knowledge.del': p => { run('DELETE FROM knowledge WHERE id=?', [p.id]); return { ok: true } },
-  'op.del': p => { run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true } },
-  'component.del': p => { run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true } },
-  'record.del': p => { run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true } },
-  'ui.del': p => { run('DELETE FROM ui WHERE key=?', [p.key]); return { ok: true } },
+  'knowledge.del': p => { const r = run('DELETE FROM knowledge WHERE id=?', [p.id]); return { ok: true, changed: r.changes } },
+  'op.del': p => { const r = run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true, changed: r.changes } },
+  'component.del': p => { const r = run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true, changed: r.changes } },
+  'record.del': p => { const r = run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true, changed: r.changes } },
+  'ui.del': p => { const r = run('DELETE FROM ui WHERE key=?', [p.key]); return { ok: true, changed: r.changes } },
   // Import a shared system definition (from GET /export). Upserts ops/components/knowledge/ui in one
   // transaction (each op.set bumps its version). Truly partial-safe: each item is type-validated and
   // wrapped in its own try/catch, so one bad row is skipped-and-reported, never aborting the whole import.
@@ -242,4 +242,13 @@ const server = createServer(async (req, res) => {
   } catch (e) { send(res, 500, { error: String(e.message || e) }) }
 })
 
+// Zero-setup: if the database has no operations yet (e.g. launched via `npx` without a seed), load the
+// generic examples so the manifest/UI aren't empty. Skips when the DB is already populated, and can be
+// disabled with AGENT_OPS_NO_SEED=1. Errors here are non-fatal (a read-only demo still starts).
+if (!process.env.AGENT_OPS_NO_SEED && get('SELECT COUNT(*) n FROM operations').n === 0) {
+  try { await import('./seed.mjs'); console.log('  (empty database — auto-seeded generic examples; run `npm run seed` or import your own to change)') } catch (e) { console.error('  (auto-seed skipped: ' + (e.message || e) + ')') }
+}
+
+// A friendly message instead of a raw stack when the port is taken (the README encourages many instances).
+server.on('error', e => { if (e && e.code === 'EADDRINUSE') { console.error(`\n  port ${PORT} is already in use — set PORT=<other> and retry (e.g. PORT=8792 npm start)\n`); process.exit(1) } else { throw e } })
 server.listen(PORT, HOST, () => console.log(`\n  🔮 agent-ops → http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}   (manifest: /manifest)\n  bind ${HOST}${CORS ? ' · CORS ' + CORS : ''} · local & private (data.db). Stop: Ctrl+C\n`))

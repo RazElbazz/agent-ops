@@ -30,6 +30,25 @@ try {
   const found = (await get('/knowledge?category=__test')).find(k => k.key === 'roundtrip'); ok('imported knowledge is queryable', !!found)
   if (found) await post('knowledge.del', { id: found.id }) // cleanup the test entry
 
+  // --- coverage for the remaining actions + read endpoints (CONTRIBUTING requires a check per action) ---
+  ok('/ops lists', Array.isArray(await get('/ops')))
+  ok('/components lists', Array.isArray(await get('/components')))
+  ok('/log lists', Array.isArray(await get('/log')))
+  ok('/traces lists', Array.isArray(await get('/traces')))
+  ok('/records lists', Array.isArray(await get('/records')))
+  const compR = await post('component.set', { name: '__tc', category: 'x', description: 'd', operations: ['a'] }); ok('component.set upserts', compR.ok && compR.result.name === '__tc')
+  ok('/component/:name returns it', (await get('/component/__tc')).name === '__tc')
+  ok('component.del removes it', (await post('component.del', { name: '__tc' })).ok === true)
+  const recR = await post('record.add', { component: '__tc', type: '__note', data: { hi: 1 } }); ok('record.add returns id', recR.ok && !!recR.result.id)
+  ok('record shows in /records', (await get('/records?type=__note')).some(r => r.id === recR.result.id))
+  await post('record.del', { id: recR.result.id })
+  ok('trace.add returns id', !!(await post('trace.add', { op: '__tc', chain: ['a'], status: 'ok' })).result.id)
+  const tk = await post('task.add', { title: '__tctask', owner: 'test' }); const tid = tk.result.id
+  ok('task.update reports changed=1', (await post('task.update', { id: tid, note: 'x' })).result.changed === 1)
+  ok('task.done reports changed=1', (await post('task.done', { id: tid })).result.changed === 1)
+  ok('task.done on a missing id reports changed=0', (await post('task.done', { id: 999999 })).result.changed === 0)
+  await post('task.del', { id: tid })
+
   // --- regressions for the audit findings (must all hold) ---
   const missingStatus = (await fetch(BASE + '/public/nope-does-not-exist.txt')).status
   ok('missing static file returns 404 (no crash)', missingStatus === 404)

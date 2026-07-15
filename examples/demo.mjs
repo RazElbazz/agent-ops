@@ -71,7 +71,7 @@ async function main() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 async function cleanup() {
-  if (server) { await new Promise(res => { server.once('exit', res); try { server.kill() } catch { res() } }) }
+  if (server) { await new Promise(res => { if (server.exitCode !== null || server.signalCode !== null) return res(); server.once('exit', res); try { server.kill() } catch { res() } setTimeout(res, 2000) }) }
   // Windows holds the file briefly after exit; retry a few times.
   for (let i = 0; i < 10; i++) { let left = false; for (const suf of ['', '-wal', '-shm']) { try { rmSync(DB + suf) } catch (e) { if (e.code !== 'ENOENT') left = true } } if (!left) break; await sleep(150) }
 }

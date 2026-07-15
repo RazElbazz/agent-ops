@@ -91,8 +91,9 @@ node examples/demo.mjs
 Spins up an **isolated** server (its own scratch DB, port 8799 — your real data is untouched) and
 role-plays an agent doing a task end to end, printing every step: bootstrap → pull an operation and
 its deps → pull knowledge → execute → trace a failure → `GET /root-cause` → fix the operation via
-`op.set` (version bumps). Then run `npm test` for the smoke test, or `npm run cli -- ops` for a
-terminal client. Full walkthroughs for **Claude Code** and **GPT** live in [`examples/`](./examples/).
+`op.set` (version bumps). With the server running (`npm start` in another shell), run `npm test` for
+the smoke test, or `npm run cli -- ops` for a terminal client. Full walkthroughs for **Claude Code**
+and **GPT** live in [`examples/`](./examples/).
 
 `npm run test:concurrency` proves the core promise the honest way: it spawns **two separate server
 processes sharing one database** and fires concurrent writes at both. The key check is a read-then-write

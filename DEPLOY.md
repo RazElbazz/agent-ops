@@ -16,7 +16,8 @@ Or without cloning, straight from GitHub:
 npx github:RazElbazz/agent-ops
 ```
 
-The launcher passes `--experimental-sqlite` for you (needed on Node 22.x, a no-op on Node 24+).
+The launcher passes `--experimental-sqlite` for you (needed on Node 22.x, a no-op on Node 24+) and,
+if the database is empty on first run, seeds the generic examples so the UI and `/manifest` aren't blank.
 
 ## Share one instance across your machines (LAN)
 

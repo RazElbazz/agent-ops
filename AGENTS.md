@@ -7,7 +7,7 @@ Do **not** rely on memory or static files for *how* to do things. Pull it fresh 
 
 ## On every task
 
-1. **Check the server is up:** `curl -s http://localhost:8791/health`. If it fails, start it: `node <path-to>/agent-ops/server.mjs` (then continue).
+1. **Check the server is up:** `curl -s http://localhost:8791/health`. If it fails, start it: `npm --prefix <path-to>/agent-ops start` (or `node --experimental-sqlite <path-to>/agent-ops/server.mjs` — the flag is required on Node 22, a no-op on 24+), then continue.
 2. **Bootstrap:** `GET /manifest` — the current operations, components, and knowledge categories.
 3. **Pull the operation** for your task: `GET /op/<name>` — read its `prompt`, then pull each entry in its `deps` recursively (each dep is itself an operation with its own prompt).
 4. **Pull knowledge** the operation references: `GET /knowledge?category=<c>`.
