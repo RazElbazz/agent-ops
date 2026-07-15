@@ -1,0 +1,48 @@
+{
+  "_note": "A generic 'research → write → publish' starter set. Import it in one call to get a coherent operation graph you can build on. See examples/README.md.",
+  "operations": [
+    {
+      "name": "idea.capture",
+      "category": "research",
+      "summary": "Turn a rough thought into a scoped, answerable question",
+      "prompt": "Take the user's rough idea and sharpen it into one specific, answerable question plus the audience it serves and why it matters now. Return {question, audience, why}.",
+      "deps": []
+    },
+    {
+      "name": "source.gather",
+      "category": "research",
+      "summary": "Collect credible sources for a question",
+      "prompt": "For the given question, find several credible, independent sources. For each return {title, url, oneLineClaim}. Prefer primary sources; never fabricate a URL.",
+      "deps": []
+    },
+    {
+      "name": "fact.check",
+      "category": "research",
+      "summary": "Verify claims against the gathered sources",
+      "prompt": "Cross-check each claim you intend to use against at least two of the gathered sources. Flag anything unsupported. Return {claim, supported: true|false, sources}. Pull source.gather first.",
+      "deps": ["source.gather"]
+    },
+    {
+      "name": "draft.write",
+      "category": "writing",
+      "summary": "Write a first draft from verified material",
+      "prompt": "Write a clear first draft that answers idea.capture's question using only fact.check-verified claims, in the tone from knowledge voice.tone. Cite sources inline. Return the draft.",
+      "deps": ["idea.capture", "fact.check"]
+    },
+    {
+      "name": "publish.ready",
+      "category": "writing",
+      "summary": "Full pipeline: capture, research, verify, draft, checklist",
+      "prompt": "Run the whole pipeline: idea.capture, source.gather, fact.check, draft.write. Then produce a short publish checklist (title, one-line summary, sources listed, open questions). Return {draft, checklist}.",
+      "deps": ["draft.write"]
+    }
+  ],
+  "components": [
+    { "name": "research", "category": "knowledge", "description": "Turn ideas into verified material", "operations": ["idea.capture", "source.gather", "fact.check"] },
+    { "name": "writing", "category": "output", "description": "Draft and ready-to-publish", "operations": ["draft.write", "publish.ready"] }
+  ],
+  "knowledge": [
+    { "category": "voice", "key": "tone", "value": "Clear, specific, and honest. Short sentences. Lead with the point, support it with a cited fact, and never overclaim.", "tags": "starter" },
+    { "category": "format", "key": "output", "value": "Deliver long outputs as a clean, organized page: a clear title, sensible sections, and sources listed at the end.", "tags": "starter" }
+  ]
+}
