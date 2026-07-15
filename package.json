@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "description": "A self-describing, composable operation registry for AI agents. Every operation is a node carrying its own prompt and the operations it depends on (the edges); agents bootstrap from a manifest, pull only what a task needs, act via atomic transactions, and the system traces its chains so failures can be root-caused and the responsible operation improved. The engine is public; each user's data lives in a local, gitignored SQLite DB.",
   "type": "module",
-  "bin": { "agent-ops": "bin/agent-ops.mjs" },
-  "engines": { "node": ">=22" },
+  "bin": {
+    "agent-ops": "bin/agent-ops.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node --experimental-sqlite server.mjs",
     "seed": "node --experimental-sqlite seed.mjs",
@@ -12,8 +16,17 @@
     "demo": "node --experimental-sqlite examples/demo.mjs",
     "test": "node test.mjs",
     "test:concurrency": "node test-concurrency.mjs",
-    "cli": "node cli.mjs"
+    "cli": "node cli.mjs",
+    "fuzz": "node fuzz.mjs"
   },
-  "keywords": ["ai-agents", "operations", "prompt-registry", "composable", "self-describing", "sqlite", "mcp"],
+  "keywords": [
+    "ai-agents",
+    "operations",
+    "prompt-registry",
+    "composable",
+    "self-describing",
+    "sqlite",
+    "mcp"
+  ],
   "license": "MIT"
 }

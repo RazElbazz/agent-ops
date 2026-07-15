@@ -59,7 +59,7 @@ const ACTIONS = {
   // transaction (each op.set bumps its version). Truly partial-safe: each item is type-validated and
   // wrapped in its own try/catch, so one bad row is skipped-and-reported, never aborting the whole import.
   'import.bundle': p => { const n = { operations: 0, components: 0, knowledge: 0, ui: 0 }, skipped = []
-    const imp = (kind, action, items) => { for (const item of asArr(items)) { const msg = (!item || typeof item !== 'object' || Array.isArray(item)) ? 'not an object' : (validate[action] ? validate[action](item) : null); if (msg) { skipped.push({ type: kind, reason: msg, item }); continue } try { ACTIONS[action](item); n[kind]++ } catch (e) { skipped.push({ type: kind, reason: String(e.message || e), item }) } } }
+    const imp = (kind, action, items) => { for (const item of asArr(items)) { const msg = (!item || typeof item !== 'object' || Array.isArray(item)) ? 'not an object' : validateAction(action, item); if (msg) { skipped.push({ type: kind, reason: msg, item }); continue } try { ACTIONS[action](item); n[kind]++ } catch (e) { skipped.push({ type: kind, reason: String(e.message || e), item }) } } }
     imp('operations', 'op.set', p.operations)
     imp('components', 'component.set', p.components)
     imp('knowledge', 'knowledge.set', p.knowledge)
@@ -69,21 +69,40 @@ const ACTIONS = {
 
 const send = (res, code, obj) => { if (res.headersSent || res.writableEnded) return; const h = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }; if (CORS) { h['Access-Control-Allow-Origin'] = CORS; h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'; h['Access-Control-Allow-Headers'] = 'Content-Type' } res.writeHead(code, h); res.end(JSON.stringify(obj)) }
 const asArr = x => Array.isArray(x) ? x : []
-// Per-action type checks: reject a payload whose bound fields are the wrong type with a clean 400
-// (instead of a 500 at SQLite bind time). ui.set.value is intentionally any-typed.
-const validate = {
-  'task.add': p => typeof p.title !== 'string' ? 'title must be a string' : null,
-  'knowledge.set': p => (typeof p.category !== 'string' || typeof p.key !== 'string') ? 'category and key must be strings' : typeof p.value !== 'string' ? 'value must be a string' : null,
-  'op.set': p => typeof p.name !== 'string' ? 'name must be a string' : (p.deps != null && !Array.isArray(p.deps)) ? 'deps must be an array' : null,
-  'component.set': p => typeof p.name !== 'string' ? 'name must be a string' : (p.operations != null && !Array.isArray(p.operations)) ? 'operations must be an array' : null,
-  'record.add': p => typeof p.component !== 'string' ? 'component must be a string' : null,
-  'trace.add': p => typeof p.op !== 'string' ? 'op must be a string' : null,
-  'ui.set': p => typeof p.key !== 'string' ? 'key must be a string' : null,
-  'ui.del': p => typeof p.key !== 'string' ? 'key must be a string' : null,
+// Full per-action type contract: every field that gets bound to SQLite is checked, so ANY wrong-typed
+// payload returns a clean 400 instead of a 500 at bind time. `str` = string, `arr` = array, `num` =
+// number, `bind` = anything SQLite can bind (string/number/null). ui.set.value is intentionally any-typed
+// (it is JSON-encoded), so it is not listed. req = required-and-typed, opt = checked only when present.
+const str = v => typeof v === 'string', arr = Array.isArray, num = v => typeof v === 'number'
+const bind = v => v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint'
+const SPEC = {
+  'task.add': { req: { title: str }, opt: { owner: str, stream: str, status: str, deadline: str, due_when: str, note: str, dep: bind, priority: num } },
+  'task.update': { req: { id: bind }, opt: { title: str, owner: str, stream: str, status: str, deadline: str, due_when: str, note: str, dep: bind, priority: num } },
+  'task.done': { req: { id: bind } }, 'task.del': { req: { id: bind } },
+  'knowledge.set': { req: { category: str, key: str, value: str }, opt: { tags: str } }, 'knowledge.del': { req: { id: bind } },
+  'op.set': { req: { name: str }, opt: { category: str, summary: str, prompt: str, deps: arr } }, 'op.del': { req: { name: str } },
+  'component.set': { req: { name: str }, opt: { category: str, description: str, operations: arr } }, 'component.del': { req: { name: str } },
+  'record.add': { req: { component: str }, opt: { type: str } }, 'record.del': { req: { id: bind } },
+  'trace.add': { req: { op: str }, opt: { chat: str, status: str, note: str } },
+  'ui.set': { req: { key: str } }, 'ui.del': { req: { key: str } },
+}
+const LABEL = new Map([[str, 'a string'], [arr, 'an array'], [num, 'a number'], [bind, 'a string or number']])
+function validateAction(action, p) {
+  const s = SPEC[action]; if (!s || !p || typeof p !== 'object') return null
+  for (const [f, chk] of Object.entries(s.req || {})) if (!chk(p[f])) return `${f} must be ${LABEL.get(chk)}`
+  for (const [f, chk] of Object.entries(s.opt || {})) if (f in p && p[f] != null && !chk(p[f])) return `${f} must be ${LABEL.get(chk)}`
+  return null
 }
 // Read the whole body first; only classify AFTER parsing. A non-object JSON (null, 5, "x", []) is __bad,
 // so the /action handler never dereferences a non-object payload.
-async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 2_000_000) return { __oversize: true } } try { const v = JSON.parse(b || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : { __bad: true } } catch { return { __bad: true } } }
+async function body(req) {
+  // Always drain the whole request stream (buffer capped at 2MB). Returning early on oversize would leave
+  // unread bytes on a keep-alive socket, desyncing the NEXT request on it (the fuzzer caught this as a hang).
+  let b = '', over = false
+  for await (const c of req) { if (!over && b.length + c.length > 2_000_000) over = true; if (!over) b += c }
+  if (over) return { __oversize: true }
+  try { const v = JSON.parse(b || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : { __bad: true } } catch { return { __bad: true } }
+}
 const safeDecode = s => { try { return decodeURIComponent(s) } catch { return null } }
 // Required fields per action — reject bad payloads with a clear 400 instead of writing broken rows.
 const REQUIRED = {
@@ -234,11 +253,15 @@ const server = createServer(async (req, res) => {
       const parsed = await body(req)
       if (parsed.__oversize) return send(res, 413, { error: 'payload too large (2MB max)' })
       if (parsed.__bad) return send(res, 400, { error: 'invalid JSON body' })
-      const { action, payload = {}, chat = '' } = parsed
+      const { action } = parsed
+      const chat = typeof parsed.chat === 'string' ? parsed.chat : '' // chat is logged to actions_log; coerce so a non-string can't fail the bind
+      // Coerce a null / non-object / array payload to {} so a missing field is a clean 400, not a
+      // 500 from dereferencing null (the `= {}` default only fires on undefined, not on explicit null).
+      const payload = (parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload)) ? parsed.payload : {}
       const fn = ACTIONS[action]; if (!fn) return send(res, 400, { error: 'unknown action: ' + action, known: Object.keys(ACTIONS) })
       const missing = (REQUIRED[action] || []).filter(k => payload[k] === undefined || payload[k] === null || payload[k] === '')
       if (missing.length) return send(res, 400, { error: 'missing required field(s): ' + missing.join(', '), action, required: REQUIRED[action] })
-      const badType = validate[action] && validate[action](payload)
+      const badType = validateAction(action, payload)
       if (badType) return send(res, 400, { error: badType, action })
       try {
         // Mutation + its audit-log row are ONE atomic unit: if the log write fails, the mutation rolls

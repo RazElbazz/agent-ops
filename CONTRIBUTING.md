@@ -34,7 +34,8 @@ If you send a PR, keep these intact — they are the point of the project:
 
 1. Keep `server.mjs` small and readable; prefer a new action in the `ACTIONS` map over a new route.
 2. If you add an endpoint or action, add a check to `test.mjs`.
-3. Run `npm test` and `node examples/demo.mjs` before opening the PR — CI runs both on Node 22 and 24.
+3. Before opening the PR run `npm test`, `npm run test:concurrency` (two processes, one DB), `npm run fuzz`
+   (the server must survive every hostile input), and `node examples/demo.mjs` — CI runs all of them on Node 22 and 24.
 4. Update the README API table and `AGENTS.md`/`PROTOCOL.md` if you change the contract.
 
 ## Ideas that fit
