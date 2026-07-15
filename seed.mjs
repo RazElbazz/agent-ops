@@ -51,13 +51,22 @@ kn('_meta', 'getting-started', 'This is generic example seed data. Your real, pr
 const uiSet = (key, value) => run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [key, JSON.stringify(value), now])
 uiSet('title', 'agent-ops')
 uiSet('lang', 'en')
-uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'activity'])
+uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'records', 'activity'])
 uiSet('buttons', [{ label: 'Add example task', action: 'task.add', payload: { title: 'A task added from a UI button', owner: 'you', priority: 2 } }])
 
 // ---------- EXAMPLE TASK (only when empty) ----------
 if (get('SELECT COUNT(*) n FROM tasks').n === 0) {
   run('INSERT INTO tasks (title,owner,stream,priority,status,created) VALUES (?,?,?,?,?,?)', ['Example task, replace with your own via POST /action task.add', 'you', 'ops', 2, 'todo', today])
   console.log('seeded 1 example task')
+}
+
+// ---------- EXAMPLE RECORDS (only when empty) so the Records tab shows something ----------
+if (get('SELECT COUNT(*) n FROM records').n === 0) {
+  const rec = (component, type, data) => run('INSERT INTO records (component,type,data,created) VALUES (?,?,?,?)', [component, type, JSON.stringify(data), today])
+  rec('outreach', 'lead', { company: 'Acme Analytics', domain: 'acme.example', decisionMaker: 'Dana Cohen', role: 'VP Engineering' })
+  rec('outreach', 'lead', { company: 'Northwind SaaS', domain: 'northwind.example', decisionMaker: 'Sam Lee', role: 'CTO' })
+  rec('research', 'brief', { title: 'Example brief: how X works', sources: 3 })
+  console.log('seeded 3 example records — see the Records tab')
 }
 
 // ---------- EXAMPLE TRACES (only when empty) so /root-cause + the Activity panel show something ----------
