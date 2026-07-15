@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.mjs",
     "seed": "node seed.mjs",
-    "reset": "node seed.mjs --reset"
+    "reset": "node seed.mjs --reset",
+    "test": "node test.mjs",
+    "cli": "node cli.mjs"
   },
   "keywords": ["ai-agents", "operations", "prompt-registry", "composable", "self-describing", "sqlite", "mcp"],
   "license": "MIT"

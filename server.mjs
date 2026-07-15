@@ -51,7 +51,6 @@ const ACTIONS = {
 }
 
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(JSON.stringify(obj)) }
-const parseJSON = s => { const p = {}; try { const o = JSON.parse(s); for (const k of ['category', 'key', 'value', 'tags', 'summary', 'prompt', 'description']) if (o[k]) o[k] = String(o[k]).replace(/[—–]/g, ',') } catch {} return s }
 async function body(req) { let b = ''; for await (const c of req) b += c; try { return JSON.parse(b || '{}') } catch { return {} } }
 const opRow = r => r ? ({ ...r, deps: safeJSON(r.deps, []) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
@@ -87,7 +86,7 @@ const server = createServer(async (req, res) => {
       if (term) { w.push('(key LIKE ? OR value LIKE ?)'); v.push('%' + term + '%', '%' + term + '%') }
       return send(res, 200, all('SELECT id,category,key,value,tags,updated_at FROM knowledge' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY category,key', v))
     }
-    if (p === '/tasks' && req.method === 'GET') return send(res, 200, all('SELECT * FROM tasks ORDER BY (status="done"), priority, COALESCE(deadline,"9999")'))
+    if (p === '/tasks' && req.method === 'GET') return send(res, 200, all("SELECT * FROM tasks ORDER BY (status='done'), priority, COALESCE(deadline,'9999')"))
     if (p === '/records' && req.method === 'GET') { const w = [], v = []; if (q.get('component')) { w.push('component=?'); v.push(q.get('component')) } if (q.get('type')) { w.push('type=?'); v.push(q.get('type')) } return send(res, 200, all('SELECT * FROM records' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY id DESC LIMIT 200', v).map(r => ({ ...r, data: safeJSON(r.data, {}) }))) }
     if (p === '/log' && req.method === 'GET') return send(res, 200, all('SELECT * FROM actions_log ORDER BY id DESC LIMIT 100'))
     if (p === '/traces' && req.method === 'GET') { const op = q.get('op'); return send(res, 200, all('SELECT * FROM traces' + (op ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 100', op ? [op] : []).map(t => ({ ...t, chain: safeJSON(t.chain, []), input: safeJSON(t.input, null), output: safeJSON(t.output, null) }))) }
