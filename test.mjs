@@ -22,6 +22,7 @@ try {
   ok('missing required field rejected', (await post('task.add', {})).error !== undefined)
   ok('root-cause endpoint responds', typeof (await get('/root-cause')).failingTraces === 'number')
   ok('search endpoint responds', Array.isArray((await get('/search?q=a')).operations))
+  const lintR = await get('/lint'); ok('lint reports graph integrity', typeof lintR.ok === 'boolean' && Array.isArray(lintR.missingDeps))
   const ex = await get('/export'); ok('export returns the system definition', Array.isArray(ex.operations) && Array.isArray(ex.knowledge))
   const imp = await post('import.bundle', { knowledge: [{ category: '__test', key: 'roundtrip', value: 'ok' }] }); ok('import.bundle upserts', imp.ok && imp.result.knowledge === 1)
   const found = (await get('/knowledge?category=__test')).find(k => k.key === 'roundtrip'); ok('imported knowledge is queryable', !!found)

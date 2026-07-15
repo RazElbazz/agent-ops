@@ -71,6 +71,23 @@ const REQUIRED = {
 const opRow = r => r ? ({ ...r, deps: safeJSON(r.deps, []) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
 
+// Graph integrity: catch a broken operation graph before it bites at runtime.
+function lint() {
+  const ops = all('SELECT name,deps FROM operations').map(o => ({ name: o.name, deps: safeJSON(o.deps, []) }))
+  const names = new Set(ops.map(o => o.name))
+  const comps = all('SELECT name,operations FROM components').map(c => ({ name: c.name, operations: safeJSON(c.operations, []) }))
+  const missingDeps = [], danglingComponentOps = []
+  for (const o of ops) for (const d of o.deps) if (!names.has(d)) missingDeps.push({ operation: o.name, missingDep: d })
+  for (const c of comps) for (const op of c.operations) if (!names.has(op)) danglingComponentOps.push({ component: c.name, missingOp: op })
+  const inComponent = new Set(comps.flatMap(c => c.operations))
+  const opsNotInAnyComponent = ops.map(o => o.name).filter(n => !inComponent.has(n))
+  return {
+    ok: missingDeps.length === 0 && danglingComponentOps.length === 0,
+    missingDeps, danglingComponentOps, opsNotInAnyComponent,
+    counts: { operations: ops.length, components: comps.length },
+  }
+}
+
 // Analytic root-cause: read the trace log, find failing chains, and point at the operation
 // that most often breaks them (the last step reached in a failing chain = the likely culprit).
 const isFail = s => !!s && !/^(ok|success|pass|done|complete|good)/i.test(String(s))
@@ -120,7 +137,7 @@ const server = createServer(async (req, res) => {
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
         endpoints: {
-          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/export', '/log', '/ui', '/health'],
+          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/export', '/log', '/ui', '/health'],
           write: 'POST /action {action, payload, chat} — the one atomic gateway',
           actions: Object.keys(ACTIONS),
         },
@@ -143,6 +160,7 @@ const server = createServer(async (req, res) => {
     if (p === '/log' && req.method === 'GET') return send(res, 200, all('SELECT * FROM actions_log ORDER BY id DESC LIMIT 100'))
     if (p === '/traces' && req.method === 'GET') { const op = q.get('op'); return send(res, 200, all('SELECT * FROM traces' + (op ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 100', op ? [op] : []).map(t => ({ ...t, chain: safeJSON(t.chain, []), input: safeJSON(t.input, null), output: safeJSON(t.output, null) }))) }
     if (p === '/root-cause' && req.method === 'GET') return send(res, 200, rootCause(q.get('op')))
+    if (p === '/lint' && req.method === 'GET') return send(res, 200, lint())
     if (p === '/export' && req.method === 'GET') return send(res, 200, {
       exportedFrom: 'agent-ops', schema: 1,
       operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: safeJSON(o.deps, []) })),

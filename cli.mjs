@@ -21,6 +21,7 @@ try {
   else if (cmd === 'export') out(await get('/export'))
   else if (cmd === 'search') out(await get('/search?q=' + encodeURIComponent(a || '')))
   else if (cmd === 'root-cause') out(await get('/root-cause'))
+  else if (cmd === 'lint') out(await get('/lint'))
   else if (cmd === 'do') out(await post(a, JSON.parse(b || '{}')))
-  else console.log('usage: manifest | ops | op <name> | kn [cat] [q] | tasks | search <q> | root-cause | export | do <action> \'<json>\'')
+  else console.log('usage: manifest | ops | op <name> | kn [cat] [q] | tasks | search <q> | root-cause | lint | export | do <action> \'<json>\'')
 } catch (e) { console.error('error:', e.message, '\n(is the server running? node server.mjs)') }

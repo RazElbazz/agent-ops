@@ -124,6 +124,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/tasks` | The task board |
 | GET | `/records?component=&type=` | Domain records (leads, notes, etc.) |
 | GET | `/root-cause?op=` | Analyze the trace log: which operation is breaking chains + a fix hint |
+| GET | `/lint` | Graph integrity: operations with missing deps, components referencing missing ops, ops in no component |
 | GET | `/export` | The whole system definition (operations + components + knowledge + ui) as one JSON, for backup/sharing |
 | GET | `/ui` | UI config |
 | GET | `/log`, `/traces?op=` | Audit log and operation traces |
