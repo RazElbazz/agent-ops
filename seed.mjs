@@ -40,6 +40,13 @@ kn('format', 'output', 'Long outputs render as a clean, organized, self-containe
 kn('outreach', 'icp', 'Define your ideal customer profile here (industry, size, buying signal). This is an example placeholder; keep your real ICP in a local gitignored seed.', 'example')
 kn('_meta', 'getting-started', 'This is generic example seed data. Your real, private knowledge, leads, pricing, and tasks belong in a local gitignored seed.local.mjs so they never reach this public repo. See README.', 'example')
 
+// ---------- UI CONFIG (the UI is plasticine; agents reshape it via action ui.set) ----------
+const uiSet = (key, value) => run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [key, JSON.stringify(value), now])
+uiSet('title', 'agent-ops')
+uiSet('lang', 'en')
+uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'activity'])
+uiSet('buttons', [{ label: 'Add example task', action: 'task.add', payload: { title: 'A task added from a UI button', owner: 'you', priority: 2 } }])
+
 // ---------- EXAMPLE TASK (only when empty) ----------
 if (get('SELECT COUNT(*) n FROM tasks').n === 0) {
   run('INSERT INTO tasks (title,owner,stream,priority,status,created) VALUES (?,?,?,?,?,?)', ['Example task, replace with your own via POST /action task.add', 'you', 'ops', 2, 'todo', today])
