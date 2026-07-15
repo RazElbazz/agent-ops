@@ -52,7 +52,9 @@ Running serious work through AI agents hits three walls:
 5. `POST /action {action, payload, chat}` — send every mutation here (atomic + logged). Never write state any other way.
 6. Log a `trace.add` of the chain so failures can be root-caused, and fix a weak operation with `op.set` (bumps its version).
 
-Because operations reference other operations, they compose: a high-level operation's prompt names the lower-level operations it needs, each of which carries its own prompt.
+Because operations reference other operations, they compose: a high-level operation's prompt names the lower-level operations it needs, each of which carries its own prompt. The UI's map view shows this graph directly:
+
+![operation map](docs/operation-map.png)
 
 ---
 
