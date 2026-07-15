@@ -9,6 +9,8 @@
 
 > One project = one API server. Every agent talks to it. State is atomic. The UI is moldable by the agents themselves.
 
+![agent-ops overview](docs/overview.png)
+
 ---
 
 ## Why
@@ -102,6 +104,10 @@ Then just open several agent chats under that folder. They all talk to the same 
 ## The UI is plasticine
 
 The explorer UI is **config-driven from the API**, so your agent can reshape it for you by calling the API: change the title or language, add buttons that trigger operations, add panels that show specific records. You describe what you want to your agent in plain language; it calls `POST /action {action:"ui.set", ...}` and the UI updates. No front-end editing by hand.
+
+The Activity tab reads `/root-cause` and points at the operation breaking your chains:
+
+![root-cause panel](docs/root-cause.png)
 
 ```bash
 # an agent adds a one-click button that runs your outreach batch:
