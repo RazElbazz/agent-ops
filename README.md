@@ -72,6 +72,18 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 
 `npm run reset` wipes and re-seeds. The database file `data.db` is gitignored.
 
+### See the whole thing run in one command
+
+```bash
+node examples/demo.mjs
+```
+
+Spins up an **isolated** server (its own scratch DB, port 8799 — your real data is untouched) and
+role-plays an agent doing a task end to end, printing every step: bootstrap → pull an operation and
+its deps → pull knowledge → execute → trace a failure → `GET /root-cause` → fix the operation via
+`op.set` (version bumps). Then run `npm test` for the smoke test, or `npm run cli -- ops` for a
+terminal client. Full walkthroughs for **Claude Code** and **GPT** live in [`examples/`](./examples/).
+
 ---
 
 ## Use it with your agent
@@ -103,8 +115,10 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/ops` | List operations |
 | GET | `/component/:name`, `/components` | Components and their operations |
 | GET | `/knowledge?category=&q=&tag=` | Query knowledge |
+| GET | `/search?q=` | One query across operations, knowledge, and components |
 | GET | `/tasks` | The task board |
 | GET | `/records?component=&type=` | Domain records (leads, notes, etc.) |
+| GET | `/root-cause?op=` | Analyze the trace log: which operation is breaking chains + a fix hint |
 | GET | `/ui` | UI config |
 | GET | `/log`, `/traces?op=` | Audit log and operation traces |
 | GET | `/health` | Liveness + counts |
@@ -127,9 +141,12 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 ```
 agent-ops/
 ├── server.mjs          # the API (zero-dep Node HTTP)
-├── lib/db.mjs          # SQLite schema + helpers
+├── lib/db.mjs          # SQLite schema + helpers (DB path via AGENT_OPS_DB)
 ├── seed.mjs            # generic, public example seed
 ├── seed.local.mjs      # YOUR private seed (gitignored, you create it)
+├── cli.mjs             # terminal client  (npm run cli -- ops|op|kn|tasks|do)
+├── test.mjs            # smoke test        (npm test)
+├── examples/           # runnable demo + setup guides (Claude Code, GPT, authoring ops)
 ├── public/index.html   # the explorer / control UI (config-driven)
 ├── AGENTS.md           # portable drop-in: teaches any agent the protocol
 ├── PROTOCOL.md         # the protocol, in detail
