@@ -1,5 +1,10 @@
 # agent-ops
 
+[![CI](https://github.com/RazElbazz/agent-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/RazElbazz/agent-ops/actions/workflows/ci.yml)
+&nbsp;![Node](https://img.shields.io/badge/node-%E2%89%A522-informational)
+&nbsp;![deps](https://img.shields.io/badge/dependencies-0-brightgreen)
+&nbsp;![license](https://img.shields.io/badge/license-MIT-blue)
+
 **A self-describing operation registry for AI agents.** Point any agent (Claude Opus / Claude Code + workflows, GPT, etc.) at one small local server and it bootstraps everything it needs from there: which operations exist, the prompt for each, what each depends on, and the knowledge each requires. Open many agent chats in parallel under one project and they stay in perfect sync, because the server is the single source of truth. The engine is public; your data lives in a local, gitignored database.
 
 > One project = one API server. Every agent talks to it. State is atomic. The UI is moldable by the agents themselves.
