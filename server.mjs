@@ -1,6 +1,6 @@
 // server.mjs — agent-ops API. Zero-dep Node HTTP. The single coordination point for all chats.
 //   Reads:  GET /manifest · /op/:name · /ops · /knowledge?category=&q=&tag= · /component/:name · /components
-//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /export · /ui · /health
+//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|task.update|task.done|task.del · knowledge.set · op.set · component.set
 //                    record.add · trace.add · ui.set · import.bundle
@@ -88,9 +88,24 @@ function lint() {
   }
 }
 
+const isFail = s => !!s && !/^(ok|success|pass|done|complete|good)/i.test(String(s))
+
+// Usage analytics: how often each operation runs and its success rate (from traces), plus the
+// action-type breakdown (from the audit log). Complements /root-cause: what runs a lot vs what fails.
+function stats() {
+  const traces = all('SELECT op,status FROM traces')
+  const byOp = {}
+  for (const t of traces) { const o = byOp[t.op] || (byOp[t.op] = { op: t.op, runs: 0, ok: 0, fail: 0 }); o.runs++; if (isFail(t.status)) o.fail++; else if (t.status) o.ok++ }
+  const runsByOp = Object.values(byOp).map(o => ({ ...o, successRate: (o.ok + o.fail) ? Math.round(100 * o.ok / (o.ok + o.fail)) : null })).sort((a, b) => b.runs - a.runs)
+  return {
+    totals: { operations: get('SELECT COUNT(*) n FROM operations').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, records: get('SELECT COUNT(*) n FROM records').n, traces: traces.length, actions: get('SELECT COUNT(*) n FROM actions_log').n },
+    runsByOp,
+    actionsByType: all('SELECT action, COUNT(*) n FROM actions_log GROUP BY action ORDER BY n DESC'),
+  }
+}
+
 // Analytic root-cause: read the trace log, find failing chains, and point at the operation
 // that most often breaks them (the last step reached in a failing chain = the likely culprit).
-const isFail = s => !!s && !/^(ok|success|pass|done|complete|good)/i.test(String(s))
 function rootCause(opFilter) {
   const rows = all('SELECT * FROM traces' + (opFilter ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 500', opFilter ? [opFilter] : [])
     .map(t => ({ ...t, chain: safeJSON(t.chain, []) }))
@@ -137,7 +152,7 @@ const server = createServer(async (req, res) => {
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
         endpoints: {
-          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/export', '/log', '/ui', '/health'],
+          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/stats', '/export', '/log', '/ui', '/health'],
           write: 'POST /action {action, payload, chat} — the one atomic gateway',
           actions: Object.keys(ACTIONS),
         },
@@ -161,6 +176,7 @@ const server = createServer(async (req, res) => {
     if (p === '/traces' && req.method === 'GET') { const op = q.get('op'); return send(res, 200, all('SELECT * FROM traces' + (op ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 100', op ? [op] : []).map(t => ({ ...t, chain: safeJSON(t.chain, []), input: safeJSON(t.input, null), output: safeJSON(t.output, null) }))) }
     if (p === '/root-cause' && req.method === 'GET') return send(res, 200, rootCause(q.get('op')))
     if (p === '/lint' && req.method === 'GET') return send(res, 200, lint())
+    if (p === '/stats' && req.method === 'GET') return send(res, 200, stats())
     if (p === '/export' && req.method === 'GET') return send(res, 200, {
       exportedFrom: 'agent-ops', schema: 1,
       operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: safeJSON(o.deps, []) })),

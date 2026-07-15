@@ -61,11 +61,14 @@ Because operations reference other operations, they compose: a high-level operat
 Requires **Node 22+** (uses the built-in `node:sqlite`, zero dependencies).
 
 ```bash
-git clone https://github.com/<you>/agent-ops
+git clone https://github.com/RazElbazz/agent-ops
 cd agent-ops
 npm run seed        # populate data.db with generic example operations + knowledge
 npm start           # start the server → http://localhost:8791
 ```
+
+Or run it straight from GitHub without cloning: `npx github:RazElbazz/agent-ops`. Hosting/LAN/tunnel
+notes are in [DEPLOY.md](./DEPLOY.md).
 
 Open `http://localhost:8791` for the explorer UI, or hit the API:
 
@@ -131,6 +134,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/records?component=&type=` | Domain records (leads, notes, etc.) |
 | GET | `/root-cause?op=` | Analyze the trace log: which operation is breaking chains + a fix hint |
 | GET | `/lint` | Graph integrity: operations with missing deps, components referencing missing ops, ops in no component |
+| GET | `/stats` | Usage analytics: runs + success-rate per operation (from traces), action-type breakdown |
 | GET | `/export` | The whole system definition (operations + components + knowledge + ui) as one JSON, for backup/sharing |
 | GET | `/ui` | UI config |
 | GET | `/log`, `/traces?op=` | Audit log and operation traces |
@@ -156,6 +160,7 @@ Share or back up a whole setup: `curl localhost:8791/export > my-system.json`, t
 ```
 agent-ops/
 ├── server.mjs          # the API (zero-dep Node HTTP)
+├── bin/agent-ops.mjs   # npx launcher (adds the Node 22 sqlite flag for you)
 ├── lib/db.mjs          # SQLite schema + helpers (DB path via AGENT_OPS_DB)
 ├── seed.mjs            # generic, public example seed
 ├── seed.local.mjs      # YOUR private seed (gitignored, you create it)
