@@ -1,9 +1,9 @@
 // server.mjs — agent-ops API. Zero-dep Node HTTP. The single coordination point for all chats.
 //   Reads:  GET /manifest · /op/:name · /ops · /knowledge?category=&q=&tag= · /component/:name · /components
-//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /ui · /health
+//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|task.update|task.done|task.del · knowledge.set · op.set · component.set
-//                    record.add · trace.add
+//                    record.add · trace.add · ui.set · import.bundle
 // Run:  node server.mjs   (if node:sqlite asks for a flag: node --experimental-sqlite server.mjs)
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -49,6 +49,14 @@ const ACTIONS = {
   'op.del': p => { run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true } },
   'component.del': p => { run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true } },
   'record.del': p => { run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true } },
+  // Import a shared system definition (from GET /export). Upserts ops/components/knowledge/ui in one
+  // transaction (each op.set bumps its version). Lets you move or share a whole agent setup as one JSON.
+  'import.bundle': p => { const n = { operations: 0, components: 0, knowledge: 0, ui: 0 }
+    for (const o of (p.operations || [])) { if (o && o.name) { ACTIONS['op.set'](o); n.operations++ } }
+    for (const c of (p.components || [])) { if (c && c.name) { ACTIONS['component.set'](c); n.components++ } }
+    for (const k of (p.knowledge || [])) { if (k && k.category && k.key) { ACTIONS['knowledge.set'](k); n.knowledge++ } }
+    if (p.ui && typeof p.ui === 'object') for (const [key, value] of Object.entries(p.ui)) { ACTIONS['ui.set']({ key, value }); n.ui++ }
+    return n },
 }
 
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(JSON.stringify(obj)) }
@@ -112,7 +120,7 @@ const server = createServer(async (req, res) => {
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
         endpoints: {
-          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/log', '/ui', '/health'],
+          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/export', '/log', '/ui', '/health'],
           write: 'POST /action {action, payload, chat} — the one atomic gateway',
           actions: Object.keys(ACTIONS),
         },
@@ -135,6 +143,13 @@ const server = createServer(async (req, res) => {
     if (p === '/log' && req.method === 'GET') return send(res, 200, all('SELECT * FROM actions_log ORDER BY id DESC LIMIT 100'))
     if (p === '/traces' && req.method === 'GET') { const op = q.get('op'); return send(res, 200, all('SELECT * FROM traces' + (op ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 100', op ? [op] : []).map(t => ({ ...t, chain: safeJSON(t.chain, []), input: safeJSON(t.input, null), output: safeJSON(t.output, null) }))) }
     if (p === '/root-cause' && req.method === 'GET') return send(res, 200, rootCause(q.get('op')))
+    if (p === '/export' && req.method === 'GET') return send(res, 200, {
+      exportedFrom: 'agent-ops', schema: 1,
+      operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: safeJSON(o.deps, []) })),
+      components: all('SELECT name,category,description,operations FROM components ORDER BY category,name').map(c => ({ ...c, operations: safeJSON(c.operations, []) })),
+      knowledge: all('SELECT category,key,value,tags FROM knowledge ORDER BY category,key'),
+      ui: (() => { const o = {}; for (const r of all('SELECT key,value FROM ui')) o[r.key] = safeJSON(r.value, r.value); return o })(),
+    })
     if (p === '/search' && req.method === 'GET') {
       const term = (q.get('q') || '').trim(); if (!term) return send(res, 400, { error: 'pass ?q=<term>' }); const like = '%' + term + '%'
       return send(res, 200, {

@@ -22,6 +22,10 @@ try {
   ok('missing required field rejected', (await post('task.add', {})).error !== undefined)
   ok('root-cause endpoint responds', typeof (await get('/root-cause')).failingTraces === 'number')
   ok('search endpoint responds', Array.isArray((await get('/search?q=a')).operations))
+  const ex = await get('/export'); ok('export returns the system definition', Array.isArray(ex.operations) && Array.isArray(ex.knowledge))
+  const imp = await post('import.bundle', { knowledge: [{ category: '__test', key: 'roundtrip', value: 'ok' }] }); ok('import.bundle upserts', imp.ok && imp.result.knowledge === 1)
+  const found = (await get('/knowledge?category=__test')).find(k => k.key === 'roundtrip'); ok('imported knowledge is queryable', !!found)
+  if (found) await post('knowledge.del', { id: found.id }) // cleanup the test entry
 } catch (e) { fail++; console.log('  ✗ threw: ' + e.message + '  (is the server running?)') }
 
 console.log(`\n${pass} passed, ${fail} failed`)

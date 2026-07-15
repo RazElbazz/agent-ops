@@ -18,6 +18,9 @@ try {
   else if (cmd === 'op') out(await get('/op/' + encodeURIComponent(a)))
   else if (cmd === 'kn') (await get('/knowledge?' + (a ? 'category=' + encodeURIComponent(a) : '') + (b ? '&q=' + encodeURIComponent(b) : ''))).forEach(k => console.log(`  [${k.category}] ${k.key}: ${k.value}`))
   else if (cmd === 'tasks') (await get('/tasks')).filter(t => t.status !== 'done').forEach(t => console.log(`  P${t.priority} [${t.owner}] ${t.title}  ${t.deadline || ''}`))
+  else if (cmd === 'export') out(await get('/export'))
+  else if (cmd === 'search') out(await get('/search?q=' + encodeURIComponent(a || '')))
+  else if (cmd === 'root-cause') out(await get('/root-cause'))
   else if (cmd === 'do') out(await post(a, JSON.parse(b || '{}')))
-  else console.log('usage: manifest | ops | op <name> | kn [cat] [q] | tasks | do <action> \'<json>\'')
+  else console.log('usage: manifest | ops | op <name> | kn [cat] [q] | tasks | search <q> | root-cause | export | do <action> \'<json>\'')
 } catch (e) { console.error('error:', e.message, '\n(is the server running? node server.mjs)') }

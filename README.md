@@ -124,12 +124,15 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/tasks` | The task board |
 | GET | `/records?component=&type=` | Domain records (leads, notes, etc.) |
 | GET | `/root-cause?op=` | Analyze the trace log: which operation is breaking chains + a fix hint |
+| GET | `/export` | The whole system definition (operations + components + knowledge + ui) as one JSON, for backup/sharing |
 | GET | `/ui` | UI config |
 | GET | `/log`, `/traces?op=` | Audit log and operation traces |
 | GET | `/health` | Liveness + counts |
 | POST | `/action` | The one atomic write gateway |
 
-**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `record.add` · `trace.add` · `ui.set`.
+**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `import.bundle`.
+
+Share or back up a whole setup: `curl localhost:8791/export > my-system.json`, then on another instance `curl -X POST localhost:8791/action -d '{"action":"import.bundle","payload":'"$(cat my-system.json)"'}'`.
 
 ---
 
