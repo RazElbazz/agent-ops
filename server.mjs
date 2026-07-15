@@ -2,8 +2,8 @@
 //   Reads:  GET /manifest · /op/:name · /ops · /knowledge?category=&q=&tag= · /component/:name · /components
 //           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
-//           actions: task.add|task.update|task.done|task.del · knowledge.set · op.set · component.set
-//                    record.add · trace.add · ui.set · import.bundle
+//           actions: task.add|update|done|del · knowledge.set|del · op.set|del · component.set|del
+//                    record.add|del · trace.add · ui.set · import.bundle
 // Run:  node server.mjs   (if node:sqlite asks for a flag: node --experimental-sqlite server.mjs)
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -13,6 +13,11 @@ import { all, get, run, tx, nowISO } from './lib/db.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 8791
+// Bind to localhost by default (the write gateway is unauthenticated). Set HOST=0.0.0.0 to expose on
+// the LAN. CORS is OFF by default so a random website can't read/drive your local server from a
+// browser; set ALLOW_ORIGIN (e.g. '*' or 'https://foo') to opt in for cross-origin browser clients.
+const HOST = process.env.HOST || '127.0.0.1'
+const CORS = process.env.ALLOW_ORIGIN || ''
 const today = () => new Date().toISOString().slice(0, 10)
 
 const PROTOCOL = [
@@ -44,23 +49,27 @@ const ACTIONS = {
   'record.add': p => { const r = run('INSERT INTO records (component,type,data,created) VALUES (?,?,?,?)', [p.component, p.type || '', JSON.stringify(p.data || {}), today()]); return { id: Number(r.lastInsertRowid) } },
   'trace.add': p => { const r = run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note) VALUES (?,?,?,?,?,?,?,?)',
       [nowISO(), p.chat || '', p.op || '', JSON.stringify(p.chain || []), JSON.stringify(p.input ?? null), JSON.stringify(p.output ?? null), p.status || '', p.note || '']); return { id: Number(r.lastInsertRowid) } },
-  'ui.set': p => { run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [p.key, JSON.stringify(p.value), nowISO()]); return { key: p.key } },
+  'ui.set': p => { run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [p.key, JSON.stringify(p.value === undefined ? null : p.value), nowISO()]); return { key: p.key } },
   'knowledge.del': p => { run('DELETE FROM knowledge WHERE id=?', [p.id]); return { ok: true } },
   'op.del': p => { run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true } },
   'component.del': p => { run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true } },
   'record.del': p => { run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true } },
   // Import a shared system definition (from GET /export). Upserts ops/components/knowledge/ui in one
-  // transaction (each op.set bumps its version). Lets you move or share a whole agent setup as one JSON.
-  'import.bundle': p => { const n = { operations: 0, components: 0, knowledge: 0, ui: 0 }
-    for (const o of (p.operations || [])) { if (o && o.name) { ACTIONS['op.set'](o); n.operations++ } }
-    for (const c of (p.components || [])) { if (c && c.name) { ACTIONS['component.set'](c); n.components++ } }
-    for (const k of (p.knowledge || [])) { if (k && k.category && k.key) { ACTIONS['knowledge.set'](k); n.knowledge++ } }
+  // transaction (each op.set bumps its version). Partial-safe: invalid items are skipped and reported
+  // (with the same field requirements as the individual actions), so one bad row can't abort the whole import.
+  'import.bundle': p => { const n = { operations: 0, components: 0, knowledge: 0, ui: 0 }, skipped = []
+    for (const o of (p.operations || [])) { if (o && o.name) { ACTIONS['op.set'](o); n.operations++ } else skipped.push({ type: 'operation', reason: 'missing name', item: o }) }
+    for (const c of (p.components || [])) { if (c && c.name) { ACTIONS['component.set'](c); n.components++ } else skipped.push({ type: 'component', reason: 'missing name', item: c }) }
+    for (const k of (p.knowledge || [])) { if (k && k.category && k.key && k.value != null) { ACTIONS['knowledge.set'](k); n.knowledge++ } else skipped.push({ type: 'knowledge', reason: 'missing category/key/value', item: k }) }
     if (p.ui && typeof p.ui === 'object') for (const [key, value] of Object.entries(p.ui)) { ACTIONS['ui.set']({ key, value }); n.ui++ }
-    return n },
+    return skipped.length ? { ...n, skipped } : n },
 }
 
-const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(JSON.stringify(obj)) }
-async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 2_000_000) return { __oversize: true } } try { return JSON.parse(b || '{}') } catch { return { __bad: true } } }
+const send = (res, code, obj) => { const h = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }; if (CORS) { h['Access-Control-Allow-Origin'] = CORS; h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'; h['Access-Control-Allow-Headers'] = 'Content-Type' } res.writeHead(code, h); res.end(JSON.stringify(obj)) }
+// Read the whole body first; only classify AFTER parsing. A non-object JSON (null, 5, "x", []) is __bad,
+// so the /action handler never dereferences a non-object payload.
+async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 2_000_000) return { __oversize: true } } try { const v = JSON.parse(b || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : { __bad: true } } catch { return { __bad: true } } }
+const safeDecode = s => { try { return decodeURIComponent(s) } catch { return null } }
 // Required fields per action — reject bad payloads with a clear 400 instead of writing broken rows.
 const REQUIRED = {
   'task.add': ['title'], 'task.update': ['id'], 'task.done': ['id'], 'task.del': ['id'],
@@ -139,9 +148,10 @@ const server = createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x'); const p = u.pathname; const q = u.searchParams
     if (req.method === 'OPTIONS') return send(res, 204, {})
 
-    // static UI
-    if (p === '/' || p === '/index.html') { try { return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(await readFile(join(ROOT, 'public', 'index.html'))) } catch { return send(res, 200, { ok: 'agent-ops', hint: 'no UI yet; use /manifest' }) } }
-    if (p.startsWith('/public/')) { const safe = p.replace(/\.\./g, '').slice(1); const type = { '.js': 'text/javascript', '.css': 'text/css' }[extname(p)] || 'text/plain'; try { return res.writeHead(200, { 'Content-Type': type }).end(await readFile(join(ROOT, safe))) } catch { return send(res, 404, { error: 'not found' }) } }
+    // static UI — readFile FIRST, then writeHead. (Writing the header before awaiting readFile means a
+    // missing file rejects after headers are already sent, and the catch's second writeHead crashes the process.)
+    if (p === '/' || p === '/index.html') { let html; try { html = await readFile(join(ROOT, 'public', 'index.html')) } catch { return send(res, 200, { ok: 'agent-ops', hint: 'no UI yet; use /manifest' }) } res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(html) }
+    if (p.startsWith('/public/')) { const safe = p.replace(/\.\./g, '').slice(1); const type = { '.js': 'text/javascript', '.css': 'text/css' }[extname(p)] || 'text/plain'; let buf; try { buf = await readFile(join(ROOT, safe)) } catch { return send(res, 404, { error: 'not found' }) } res.writeHead(200, { 'Content-Type': type }); return res.end(buf) }
 
     // ---- reads ----
     if (p === '/manifest' && req.method === 'GET') {
@@ -161,9 +171,9 @@ const server = createServer(async (req, res) => {
     if (p === '/health' && req.method === 'GET') return send(res, 200, { ok: true, ts: nowISO(), counts: { operations: get('SELECT COUNT(*) n FROM operations').n, components: get('SELECT COUNT(*) n FROM components').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n } })
     if (p === '/ui' && req.method === 'GET') { const rows = all('SELECT key,value FROM ui'); const o = {}; for (const r of rows) o[r.key] = safeJSON(r.value, r.value); return send(res, 200, o) }
     if (p === '/ops' && req.method === 'GET') return send(res, 200, all('SELECT name,category,summary,version FROM operations ORDER BY category,name'))
-    if (p.startsWith('/op/') && req.method === 'GET') { const o = opRow(get('SELECT * FROM operations WHERE name=?', [decodeURIComponent(p.slice(4))])); return o ? send(res, 200, o) : send(res, 404, { error: 'no such operation' }) }
+    if (p.startsWith('/op/') && req.method === 'GET') { const name = safeDecode(p.slice(4)); const o = name == null ? null : opRow(get('SELECT * FROM operations WHERE name=?', [name])); return o ? send(res, 200, o) : send(res, 404, { error: 'no such operation' }) }
     if (p === '/components' && req.method === 'GET') return send(res, 200, all('SELECT * FROM components ORDER BY category,name').map(c => ({ ...c, operations: safeJSON(c.operations, []) })))
-    if (p.startsWith('/component/') && req.method === 'GET') { const c = get('SELECT * FROM components WHERE name=?', [decodeURIComponent(p.slice(11))]); return c ? send(res, 200, { ...c, operations: safeJSON(c.operations, []) }) : send(res, 404, { error: 'no such component' }) }
+    if (p.startsWith('/component/') && req.method === 'GET') { const name = safeDecode(p.slice(11)); const c = name == null ? null : get('SELECT * FROM components WHERE name=?', [name]); return c ? send(res, 200, { ...c, operations: safeJSON(c.operations, []) }) : send(res, 404, { error: 'no such component' }) }
     if (p === '/knowledge' && req.method === 'GET') {
       const cat = q.get('category'), term = q.get('q'), tag = q.get('tag'); const w = [], v = []
       if (cat) { w.push('category=?'); v.push(cat) } if (tag) { w.push('tags LIKE ?'); v.push('%' + tag + '%') }
@@ -204,8 +214,9 @@ const server = createServer(async (req, res) => {
       const missing = (REQUIRED[action] || []).filter(k => payload[k] === undefined || payload[k] === null || payload[k] === '')
       if (missing.length) return send(res, 400, { error: 'missing required field(s): ' + missing.join(', '), action, required: REQUIRED[action] })
       try {
-        const result = tx(() => fn(payload))
-        run('INSERT INTO actions_log (ts,chat,action,payload,result) VALUES (?,?,?,?,?)', [nowISO(), chat, action, JSON.stringify(payload), JSON.stringify(result)])
+        // Mutation + its audit-log row are ONE atomic unit: if the log write fails, the mutation rolls
+        // back too, so a 500 never hides a write that actually happened (which would invite a double-apply).
+        const result = tx(() => { const r = fn(payload); run('INSERT INTO actions_log (ts,chat,action,payload,result) VALUES (?,?,?,?,?)', [nowISO(), chat, action, JSON.stringify(payload), JSON.stringify(r)]); return r })
         return send(res, 200, { ok: true, result })
       } catch (e) { return send(res, 500, { error: String(e.message || e), action }) }
     }
@@ -214,4 +225,4 @@ const server = createServer(async (req, res) => {
   } catch (e) { send(res, 500, { error: String(e.message || e) }) }
 })
 
-server.listen(PORT, () => console.log(`\n  🔮 agent-ops → http://localhost:${PORT}   (manifest: /manifest)\n  DB: agent-ops/razos... local & private. Stop: Ctrl+C\n`))
+server.listen(PORT, HOST, () => console.log(`\n  🔮 agent-ops → http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}   (manifest: /manifest)\n  bind ${HOST}${CORS ? ' · CORS ' + CORS : ''} · local & private (data.db). Stop: Ctrl+C\n`))

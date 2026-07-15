@@ -20,9 +20,16 @@ The launcher passes `--experimental-sqlite` for you (needed on Node 22.x, a no-o
 
 ## Share one instance across your machines (LAN)
 
-The server binds all interfaces on its port, so other devices on your network can reach it at
-`http://<your-lan-ip>:8791`. Point each agent's `AGENT_OPS` base URL there. Keep it on a trusted
-network — there is no auth layer (it is meant to run on your own machine/LAN).
+By default the server binds **`127.0.0.1`** (localhost only) and sends **no CORS header** — so a random
+website you visit can't reach or read your local server from the browser. To share it on your network:
+
+```bash
+HOST=0.0.0.0 npm start          # bind all interfaces; reachable at http://<your-lan-ip>:8791
+```
+
+Point each agent's `AGENT_OPS` base URL at that host. There is no auth layer, so only do this on a
+trusted network. If you need a browser-based agent on another origin to call it, opt into CORS
+explicitly with `ALLOW_ORIGIN` (e.g. `ALLOW_ORIGIN=https://your-app npm start`, or `ALLOW_ORIGIN=*`).
 
 ## Expose it temporarily (tunnels)
 
@@ -56,6 +63,8 @@ and keep it alive with your process manager of choice (`systemd`, `pm2`, `tmux`)
 | Env var | Default | Purpose |
 |---------|---------|---------|
 | `PORT` | `8791` | Server port |
+| `HOST` | `127.0.0.1` | Bind address. `0.0.0.0` to expose on the LAN |
+| `ALLOW_ORIGIN` | *(none)* | Opt into CORS for cross-origin browser clients (e.g. `*` or a URL). Off by default |
 | `AGENT_OPS_DB` | `./data.db` | SQLite file path (use a scratch path for tests/demos or a second instance) |
 
 That is the whole surface. Local-first, one file, zero dependencies.

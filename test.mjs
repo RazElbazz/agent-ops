@@ -6,6 +6,7 @@ let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) { pass++; console.log('  ✓ ' + name) } else { fail++; console.log('  ✗ ' + name) } }
 const get = async p => (await fetch(BASE + p)).json()
 const post = async (action, payload) => (await fetch(BASE + '/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, payload, chat: 'test' }) })).json()
+const rawPost = bodyStr => fetch(BASE + '/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: bodyStr }).then(r => r.status).catch(() => 0)
 
 try {
   const h = await get('/health'); ok('health responds ok', h.ok === true)
@@ -28,6 +29,18 @@ try {
   const imp = await post('import.bundle', { knowledge: [{ category: '__test', key: 'roundtrip', value: 'ok' }] }); ok('import.bundle upserts', imp.ok && imp.result.knowledge === 1)
   const found = (await get('/knowledge?category=__test')).find(k => k.key === 'roundtrip'); ok('imported knowledge is queryable', !!found)
   if (found) await post('knowledge.del', { id: found.id }) // cleanup the test entry
+
+  // --- regressions for the audit findings (must all hold) ---
+  const missingStatus = (await fetch(BASE + '/public/nope-does-not-exist.txt')).status
+  ok('missing static file returns 404 (no crash)', missingStatus === 404)
+  ok('server survived the missing-file request', (await get('/health')).ok === true) // finding #1: process must NOT die
+  ok('null JSON body is 400 (not 500)', (await rawPost('null')) === 400) // finding #5
+  ok('bad percent-encoding is 404 (not 500)', (await fetch(BASE + '/op/%E0%A4%A')).status === 404) // finding #6
+  ok('ui.set with only key does not 500', (await post('ui.set', { key: '__uitest' })).ok === true) // finding #4
+  const badBundle = await post('import.bundle', { knowledge: [{ category: '__ib', key: 'good', value: 'v' }, { category: '__ib', key: 'bad' }] }) // finding #3
+  ok('import.bundle is partial-safe (good applied, bad skipped)', badBundle.ok && badBundle.result.knowledge === 1 && (badBundle.result.skipped || []).length === 1)
+  ok('import.bundle kept the valid item', !!(await get('/knowledge?category=__ib')).find(k => k.key === 'good'))
+  for (const k of (await get('/knowledge?category=__ib'))) await post('knowledge.del', { id: k.id }) // cleanup
 } catch (e) { fail++; console.log('  ✗ threw: ' + e.message + '  (is the server running?)') }
 
 console.log(`\n${pass} passed, ${fail} failed`)
