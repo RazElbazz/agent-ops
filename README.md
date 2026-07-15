@@ -94,6 +94,10 @@ its deps → pull knowledge → execute → trace a failure → `GET /root-cause
 `op.set` (version bumps). Then run `npm test` for the smoke test, or `npm run cli -- ops` for a
 terminal client. Full walkthroughs for **Claude Code** and **GPT** live in [`examples/`](./examples/).
 
+`npm run test:concurrency` proves the core promise: it fires 60 concurrent writers and checks the
+database ended up exactly consistent — every insert landed with a unique id, concurrent upserts to one
+key leave one row, and no version bump is lost. That is the guarantee a shared JSON file cannot give you.
+
 ---
 
 ## Use it with your agent

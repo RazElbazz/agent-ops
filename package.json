@@ -11,6 +11,7 @@
     "reset": "node --experimental-sqlite seed.mjs --reset",
     "demo": "node --experimental-sqlite examples/demo.mjs",
     "test": "node test.mjs",
+    "test:concurrency": "node test-concurrency.mjs",
     "cli": "node cli.mjs"
   },
   "keywords": ["ai-agents", "operations", "prompt-registry", "composable", "self-describing", "sqlite", "mcp"],
