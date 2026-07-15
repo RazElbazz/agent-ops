@@ -19,9 +19,13 @@ Do **not** rely on memory or static files for *how* to do things. Pull it fresh 
 
 Many agent chats can run under this one project at once; they all share the server, so state is coherent and there are no lost updates. Give each chat a distinct `chat` id on its actions so the audit log and traces show who did what.
 
+## Finding things
+
+`GET /search?q=<term>` matches across operations, knowledge, and components — use it when you are not sure which operation or fact you need.
+
 ## Improving the system (self-repair)
 
-If a chain produced an unexpected result: `GET /traces?op=<name>`, walk the chain to find where the output diverged from intent, then fix that operation with `POST /action {action:"op.set", payload:{name, prompt, deps, ...}}` (bumps its version). Add new operations the same way. The system improves by editing the responsible operation, once, for every future chat.
+If a chain produced an unexpected result, ask the API to analyze it: `GET /root-cause` (optionally `?op=<name>`). It reads the trace log and names the operation that most often ends failing chains, with a fix hint. Read that operation, sharpen its `prompt`, and `POST /action {action:"op.set", payload:{name, prompt, deps, ...}}` (bumps its version). Add new operations the same way. The system improves by editing the responsible operation, once, for every future chat. (`GET /traces?op=<name>` gives the raw chains if you want to inspect them yourself.)
 
 ## Reshaping the UI
 

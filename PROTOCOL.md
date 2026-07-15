@@ -23,7 +23,7 @@ The whole design in one sentence: **the intelligence lives in the API, not in th
 3. **Pull knowledge by category** (`/knowledge?category=`) for the facts an operation references.
 4. **Mutate only through `POST /action`.** One atomic gateway, one audit trail. This is what keeps parallel chats coherent (SQLite transactions, no lost updates).
 5. **Trace every chain** so failures are debuggable.
-6. **Improve operations in place** with `op.set` (which bumps the version). Fixing the responsible node fixes it for every future chat.
+6. **Root-cause, then improve operations in place.** When a chain fails, `GET /root-cause` names the operation most responsible; fix it with `op.set` (which bumps the version). Fixing the responsible node fixes it for every future chat.
 
 ## A worked example
 
@@ -42,6 +42,11 @@ POST /action {action:"record.add", payload:{component:"outreach", type:"lead", d
 POST /action {action:"task.add",   payload:{title:"follow up on batch", ...}}
 POST /action {action:"trace.add",  payload:{op:"outreach.batch", chain:["lead.find","draft.message"], status:"ok"}}
 ```
+
+## Root-cause and discovery
+
+- `GET /root-cause[?op=]` reads the trace log, scores each operation by how often it **ends** a failing chain (the strongest signal) and how often it **appears** in one, and returns the strongest suspect with a fix hint. It turns "a chain went wrong somewhere" into "operation X is the problem — read its prompt and fix it." That closes the self-improvement loop: traces in, a better operation out.
+- `GET /search?q=` matches a term across operations, knowledge, and components in one call — the fastest way for an agent to find the right node when it does not know the exact name.
 
 ## Why this is safe for parallel chats
 
