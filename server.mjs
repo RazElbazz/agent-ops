@@ -1,6 +1,6 @@
 // server.mjs — agent-ops API. Zero-dep Node HTTP. The single coordination point for all chats.
 //   Reads:  GET /manifest · /op/:name · /ops · /knowledge?category=&q=&tag= · /component/:name · /components
-//           /tasks · /records?component=&type= · /log · /traces?op=
+//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|task.update|task.done|task.del · knowledge.set · op.set · component.set
 //                    record.add · trace.add
@@ -22,7 +22,8 @@ const PROTOCOL = [
   '3. GET /knowledge?category=<c> for the facts/rules that operation needs.',
   '4. Execute per those prompts. Everything is pulled fresh, so it is always current.',
   '5. Send every mutation as POST /action {action, payload, chat} (atomic + logged). Never write state any other way.',
-  '6. Log a trace of the chain via action trace.add so failures can be root-caused; fix a bad operation via action op.set (bumps version).',
+  '6. Log a trace of the chain via action trace.add {op,chain,status,note}. When a chain fails, GET /root-cause to see which operation ends failing chains most; read that op, fix its prompt, and POST /action op.set (bumps version). This is the self-improvement loop.',
+  'Discovery: GET /search?q=<term> matches across operations, knowledge, and components.',
 ].join('\n')
 
 // ---- atomic action gateway ----
@@ -55,6 +56,37 @@ async function body(req) { let b = ''; for await (const c of req) b += c; try { 
 const opRow = r => r ? ({ ...r, deps: safeJSON(r.deps, []) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
 
+// Analytic root-cause: read the trace log, find failing chains, and point at the operation
+// that most often breaks them (the last step reached in a failing chain = the likely culprit).
+const isFail = s => !!s && !/^(ok|success|pass|done|complete|good)/i.test(String(s))
+function rootCause(opFilter) {
+  const rows = all('SELECT * FROM traces' + (opFilter ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 500', opFilter ? [opFilter] : [])
+    .map(t => ({ ...t, chain: safeJSON(t.chain, []) }))
+  const fails = rows.filter(t => isFail(t.status))
+  const byOp = {}, byStep = {}, byCulprit = {}
+  for (const t of fails) {
+    const o = byOp[t.op] || (byOp[t.op] = { op: t.op, fails: 0, lastNote: t.note, lastOutput: safeJSON(t.output, t.output), lastChain: t.chain, lastTs: t.ts })
+    o.fails++
+    for (const step of (t.chain.length ? t.chain : [t.op])) byStep[step] = (byStep[step] || 0) + 1
+    const culprit = t.chain.length ? t.chain[t.chain.length - 1] : t.op // where the chain stopped
+    byCulprit[culprit] = (byCulprit[culprit] || 0) + 1
+  }
+  const rank = obj => Object.entries(obj).map(([name, n]) => ({ name, fails: n })).sort((a, b) => b.fails - a.fails)
+  // Score each step: ending a failing chain is the strongest signal (x2); merely appearing in one is weaker (x1).
+  const names = new Set([...Object.keys(byCulprit), ...Object.keys(byStep)])
+  const suspects = [...names].map(name => ({ name, endedChain: byCulprit[name] || 0, inFailingChains: byStep[name] || 0, score: (byCulprit[name] || 0) * 2 + (byStep[name] || 0) })).sort((a, b) => b.score - a.score)
+  const top = suspects[0]
+  return {
+    totalTraces: rows.length, failingTraces: fails.length,
+    likelyCulprit: top ? { operation: top.name, score: top.score, endedChain: top.endedChain, inFailingChains: top.inFailingChains,
+      hint: `Operation "${top.name}" is the strongest suspect (ends ${top.endedChain} failing chains, appears in ${top.inFailingChains}). GET /op/${encodeURIComponent(top.name)}, read its prompt, fix it, then POST /action op.set (bumps version).` } : null,
+    culpritRanking: suspects,
+    stepFailureCounts: rank(byStep),
+    perOperation: Object.values(byOp).sort((a, b) => b.fails - a.fails),
+    recentFailures: fails.slice(0, 15).map(t => ({ ts: t.ts, op: t.op, chain: t.chain, status: t.status, note: t.note })),
+  }
+}
+
 const server = createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x'); const p = u.pathname; const q = u.searchParams
@@ -72,6 +104,11 @@ const server = createServer(async (req, res) => {
         operations: all('SELECT name,category,summary,version FROM operations ORDER BY category,name'),
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
+        endpoints: {
+          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/log', '/ui', '/health'],
+          write: 'POST /action {action, payload, chat} — the one atomic gateway',
+          actions: Object.keys(ACTIONS),
+        },
       })
     }
     if (p === '/health' && req.method === 'GET') return send(res, 200, { ok: true, ts: nowISO(), counts: { operations: get('SELECT COUNT(*) n FROM operations').n, components: get('SELECT COUNT(*) n FROM components').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n } })
@@ -90,6 +127,16 @@ const server = createServer(async (req, res) => {
     if (p === '/records' && req.method === 'GET') { const w = [], v = []; if (q.get('component')) { w.push('component=?'); v.push(q.get('component')) } if (q.get('type')) { w.push('type=?'); v.push(q.get('type')) } return send(res, 200, all('SELECT * FROM records' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY id DESC LIMIT 200', v).map(r => ({ ...r, data: safeJSON(r.data, {}) }))) }
     if (p === '/log' && req.method === 'GET') return send(res, 200, all('SELECT * FROM actions_log ORDER BY id DESC LIMIT 100'))
     if (p === '/traces' && req.method === 'GET') { const op = q.get('op'); return send(res, 200, all('SELECT * FROM traces' + (op ? ' WHERE op=?' : '') + ' ORDER BY id DESC LIMIT 100', op ? [op] : []).map(t => ({ ...t, chain: safeJSON(t.chain, []), input: safeJSON(t.input, null), output: safeJSON(t.output, null) }))) }
+    if (p === '/root-cause' && req.method === 'GET') return send(res, 200, rootCause(q.get('op')))
+    if (p === '/search' && req.method === 'GET') {
+      const term = (q.get('q') || '').trim(); if (!term) return send(res, 400, { error: 'pass ?q=<term>' }); const like = '%' + term + '%'
+      return send(res, 200, {
+        query: term,
+        operations: all('SELECT name,category,summary,version FROM operations WHERE name LIKE ? OR summary LIKE ? OR prompt LIKE ? ORDER BY category,name', [like, like, like]),
+        knowledge: all('SELECT id,category,key,value,tags FROM knowledge WHERE key LIKE ? OR value LIKE ? OR tags LIKE ? ORDER BY category,key', [like, like, like]),
+        components: all('SELECT name,category,description FROM components WHERE name LIKE ? OR description LIKE ? ORDER BY category,name', [like, like]),
+      })
+    }
 
     // ---- the atomic write gateway ----
     if (p === '/action' && req.method === 'POST') {
