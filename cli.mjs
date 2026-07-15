@@ -16,6 +16,7 @@ try {
   if (cmd === 'manifest') out(await get('/manifest'))
   else if (cmd === 'ops') (await get('/ops')).forEach(o => console.log(`  ${o.name}  (v${o.version})  ${o.summary}`))
   else if (cmd === 'op') out(await get('/op/' + encodeURIComponent(a)))
+  else if (cmd === 'history') out(await get('/op/' + encodeURIComponent(a) + '/history'))
   else if (cmd === 'kn') (await get('/knowledge?' + (a ? 'category=' + encodeURIComponent(a) : '') + (b ? '&q=' + encodeURIComponent(b) : ''))).forEach(k => console.log(`  [${k.category}] ${k.key}: ${k.value}`))
   else if (cmd === 'tasks') (await get('/tasks')).filter(t => t.status !== 'done').forEach(t => console.log(`  P${t.priority} [${t.owner}] ${t.title}  ${t.deadline || ''}`))
   else if (cmd === 'export') out(await get('/export'))
@@ -24,5 +25,5 @@ try {
   else if (cmd === 'lint') out(await get('/lint'))
   else if (cmd === 'stats') out(await get('/stats'))
   else if (cmd === 'do') out(await post(a, JSON.parse(b || '{}')))
-  else console.log('usage: manifest | ops | op <name> | kn [cat] [q] | tasks | search <q> | root-cause | lint | stats | export | do <action> \'<json>\'')
+  else console.log('usage: manifest | ops | op <name> | history <name> | kn [cat] [q] | tasks | search <q> | root-cause | lint | stats | export | do <action> \'<json>\'')
 } catch (e) { console.error('error:', e.message, '\n(is the server running? node server.mjs)') }

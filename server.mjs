@@ -177,7 +177,7 @@ const server = createServer(async (req, res) => {
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
         endpoints: {
-          reads: ['/manifest', '/op/:name', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/stats', '/export', '/log', '/ui', '/health'],
+          reads: ['/manifest', '/op/:name', '/op/:name/history', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/stats', '/export', '/log', '/ui', '/health'],
           write: 'POST /action {action, payload, chat} — the one atomic gateway',
           actions: Object.keys(ACTIONS),
         },
@@ -186,6 +186,16 @@ const server = createServer(async (req, res) => {
     if (p === '/health' && req.method === 'GET') return send(res, 200, { ok: true, ts: nowISO(), counts: { operations: get('SELECT COUNT(*) n FROM operations').n, components: get('SELECT COUNT(*) n FROM components').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n } })
     if (p === '/ui' && req.method === 'GET') { const rows = all('SELECT key,value FROM ui'); const o = {}; for (const r of rows) o[r.key] = safeJSON(r.value, r.value); return send(res, 200, o) }
     if (p === '/ops' && req.method === 'GET') return send(res, 200, all('SELECT name,category,summary,version FROM operations ORDER BY category,name'))
+    if (p.startsWith('/op/') && p.endsWith('/history') && req.method === 'GET') {
+      // Reconstruct an operation's evolution from the audit log (every op.set is recorded) — no extra
+      // storage. Lets you see how a prompt changed over versions and recover a prior one (op.set it back).
+      const name = safeDecode(p.slice(4, -8)); if (name == null) return send(res, 404, { error: 'no such operation' })
+      const history = all("SELECT ts,chat,payload,result FROM actions_log WHERE action='op.set' ORDER BY id ASC")
+        .map(r => ({ ts: r.ts, chat: r.chat, payload: safeJSON(r.payload, {}), result: safeJSON(r.result, {}) }))
+        .filter(r => r.result && r.result.name === name)
+        .map(r => ({ version: r.result.version, ts: r.ts, chat: r.chat, summary: r.payload.summary, prompt: r.payload.prompt, deps: asArr(r.payload.deps) }))
+      return send(res, 200, { name, current: (get('SELECT version FROM operations WHERE name=?', [name]) || {}).version ?? null, history })
+    }
     if (p.startsWith('/op/') && req.method === 'GET') { const name = safeDecode(p.slice(4)); const o = name == null ? null : opRow(get('SELECT * FROM operations WHERE name=?', [name])); return o ? send(res, 200, o) : send(res, 404, { error: 'no such operation' }) }
     if (p === '/components' && req.method === 'GET') return send(res, 200, all('SELECT * FROM components ORDER BY category,name').map(c => ({ ...c, operations: asArr(safeJSON(c.operations, [])) })))
     if (p.startsWith('/component/') && req.method === 'GET') { const name = safeDecode(p.slice(11)); const c = name == null ? null : get('SELECT * FROM components WHERE name=?', [name]); return c ? send(res, 200, { ...c, operations: asArr(safeJSON(c.operations, [])) }) : send(res, 404, { error: 'no such component' }) }

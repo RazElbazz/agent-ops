@@ -135,6 +135,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 |---|---|---|
 | GET | `/manifest` | Bootstrap: components, operations, knowledge categories, counts, protocol |
 | GET | `/op/:name` | One operation: prompt + deps + version |
+| GET | `/op/:name/history` | How the operation evolved (every version's prompt/deps, from the audit log) |
 | GET | `/ops` | List operations |
 | GET | `/component/:name`, `/components` | Components and their operations |
 | GET | `/knowledge?category=&q=&tag=` | Query knowledge |
