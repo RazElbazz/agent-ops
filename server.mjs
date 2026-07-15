@@ -52,7 +52,14 @@ const ACTIONS = {
 }
 
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); res.end(JSON.stringify(obj)) }
-async function body(req) { let b = ''; for await (const c of req) b += c; try { return JSON.parse(b || '{}') } catch { return {} } }
+async function body(req) { let b = ''; for await (const c of req) { b += c; if (b.length > 2_000_000) return { __oversize: true } } try { return JSON.parse(b || '{}') } catch { return { __bad: true } } }
+// Required fields per action — reject bad payloads with a clear 400 instead of writing broken rows.
+const REQUIRED = {
+  'task.add': ['title'], 'task.update': ['id'], 'task.done': ['id'], 'task.del': ['id'],
+  'knowledge.set': ['category', 'key', 'value'], 'knowledge.del': ['id'],
+  'op.set': ['name'], 'op.del': ['name'], 'component.set': ['name'], 'component.del': ['name'],
+  'record.add': ['component'], 'record.del': ['id'], 'trace.add': ['op'], 'ui.set': ['key'],
+}
 const opRow = r => r ? ({ ...r, deps: safeJSON(r.deps, []) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
 
@@ -140,8 +147,13 @@ const server = createServer(async (req, res) => {
 
     // ---- the atomic write gateway ----
     if (p === '/action' && req.method === 'POST') {
-      const { action, payload = {}, chat = '' } = await body(req)
+      const parsed = await body(req)
+      if (parsed.__oversize) return send(res, 413, { error: 'payload too large (2MB max)' })
+      if (parsed.__bad) return send(res, 400, { error: 'invalid JSON body' })
+      const { action, payload = {}, chat = '' } = parsed
       const fn = ACTIONS[action]; if (!fn) return send(res, 400, { error: 'unknown action: ' + action, known: Object.keys(ACTIONS) })
+      const missing = (REQUIRED[action] || []).filter(k => payload[k] === undefined || payload[k] === null || payload[k] === '')
+      if (missing.length) return send(res, 400, { error: 'missing required field(s): ' + missing.join(', '), action, required: REQUIRED[action] })
       try {
         const result = tx(() => fn(payload))
         run('INSERT INTO actions_log (ts,chat,action,payload,result) VALUES (?,?,?,?,?)', [nowISO(), chat, action, JSON.stringify(payload), JSON.stringify(result)])

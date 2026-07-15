@@ -18,9 +18,10 @@ const BASE = `http://localhost:${PORT}`
 const DB = join(tmpdir(), `agent-ops-demo-${process.pid}.db`)
 const env = { ...process.env, AGENT_OPS_DB: DB, PORT: String(PORT) }
 const node = process.execPath
+const FLAG = '--experimental-sqlite' // required on Node 22.x, accepted (no-op) on Node 24
 const h = s => `\n\x1b[1m\x1b[36m${s}\x1b[0m` // bold cyan section header
 const dim = s => `\x1b[2m${s}\x1b[0m`
-const sh = (args) => new Promise((res, rej) => { const c = spawn(node, args, { cwd: ROOT, env, stdio: 'ignore' }); c.on('exit', code => code === 0 ? res() : rej(new Error(args.join(' ') + ' exited ' + code))) })
+const sh = (args) => new Promise((res, rej) => { const c = spawn(node, [FLAG, ...args], { cwd: ROOT, env, stdio: 'ignore' }); c.on('exit', code => code === 0 ? res() : rej(new Error(args.join(' ') + ' exited ' + code))) })
 const get = async p => (await fetch(BASE + p)).json()
 const post = (action, payload, chat = 'demo') => fetch(BASE + '/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, payload, chat }) }).then(r => r.json())
 
@@ -28,7 +29,7 @@ let server
 async function main() {
   console.log(dim(`(isolated demo: scratch DB ${DB}, port ${PORT} — your real data is untouched)`))
   await sh(['seed.mjs', '--reset'])                              // seed generic examples into the scratch DB
-  server = spawn(node, ['server.mjs'], { cwd: ROOT, env, stdio: 'ignore' })
+  server = spawn(node, [FLAG, 'server.mjs'], { cwd: ROOT, env, stdio: 'ignore' })
   for (let i = 0; i < 30; i++) { try { if ((await get('/health')).ok) break } catch {} await new Promise(r => setTimeout(r, 150)) }
 
   console.log(h('1. Bootstrap — the agent reads the manifest to learn how to work here'))

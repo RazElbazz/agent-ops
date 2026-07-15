@@ -19,7 +19,12 @@ try {
   await post('task.del', { id: add.result.id }); ok('task.del cleans up', (await get('/tasks')).length === before)
   const ui = await get('/ui'); ok('ui config present', ui && 'title' in ui)
   ok('unknown action rejected', (await post('nope.nope', {})).error !== undefined)
+  ok('missing required field rejected', (await post('task.add', {})).error !== undefined)
+  ok('root-cause endpoint responds', typeof (await get('/root-cause')).failingTraces === 'number')
+  ok('search endpoint responds', Array.isArray((await get('/search?q=a')).operations))
 } catch (e) { fail++; console.log('  ✗ threw: ' + e.message + '  (is the server running?)') }
 
 console.log(`\n${pass} passed, ${fail} failed`)
-process.exit(fail ? 1 : 0)
+// Set the exit code and let the loop drain (undici keep-alive sockets close on their own).
+// Avoid process.exit() here: forcing exit while sockets are mid-teardown trips a libuv assertion on Windows.
+process.exitCode = fail ? 1 : 0

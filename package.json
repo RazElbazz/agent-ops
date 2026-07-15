@@ -5,9 +5,10 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node server.mjs",
-    "seed": "node seed.mjs",
-    "reset": "node seed.mjs --reset",
+    "start": "node --experimental-sqlite server.mjs",
+    "seed": "node --experimental-sqlite seed.mjs",
+    "reset": "node --experimental-sqlite seed.mjs --reset",
+    "demo": "node --experimental-sqlite examples/demo.mjs",
     "test": "node test.mjs",
     "cli": "node cli.mjs"
   },
