@@ -26,18 +26,24 @@ That is the entire model. Everything else is detail.
 | [openai-gpt.md](openai-gpt.md) | Wire it into **GPT / any function-calling agent**. The protocol is just HTTP, so it is language- and model-agnostic. Python example included. |
 | [add-an-operation.md](add-an-operation.md) | Author your **own operations, knowledge, and components** — the anatomy of a self-describing operation, how deps compose, and how the self-improvement loop works. |
 
-## A ready-made starter set
+## Ready-made starter packs
 
-[`starter-pack.json`](starter-pack.json) is a coherent `research → write → publish` operation graph
-you can drop into a running server in one call:
+Each of these is a coherent operation graph you can drop into a running server in one call — proof the
+engine isn't content-specific, it's whatever operations you give it:
+
+| Pack | Domain | Graph |
+|------|--------|-------|
+| [`starter-pack.json`](starter-pack.json) | research | idea.capture → source.gather → fact.check → draft.write → publish.ready |
+| [`pack-software.json`](pack-software.json) | software delivery | bug.triage → bug.reproduce → bug.fix · change.review · release.notes |
+| [`pack-sales.json`](pack-sales.json) | sales pipeline | lead.qualify → demo.prep · objection.handle · deal.close · followup.write |
 
 ```bash
 curl -s localhost:8791/action -H 'content-type: application/json' \
-  -d "{\"action\":\"import.bundle\",\"payload\":$(cat examples/starter-pack.json)}"
+  -d "{\"action\":\"import.bundle\",\"payload\":$(cat examples/pack-software.json)}"
 ```
 
 Then open the UI (Operations → map) to see the graph, or `curl localhost:8791/op/publish.ready` to
-see how it composes the smaller operations. Edit any of them with `op.set` to make them yours.
+see how a top-level operation composes the smaller ones. Edit any of them with `op.set` to make them yours.
 
 ## The one rule
 

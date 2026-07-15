@@ -1,0 +1,18 @@
+{
+  "_note": "A sales-pipeline starter set (qualify → prep → handle objections → close → follow up). Import with: curl -s localhost:8791/action -H 'content-type: application/json' -d \"{\\\"action\\\":\\\"import.bundle\\\",\\\"payload\\\":$(cat examples/pack-sales.json)}\"",
+  "operations": [
+    { "name": "lead.qualify", "category": "pipeline", "summary": "Decide if a lead is worth pursuing", "prompt": "Given a lead, score fit against knowledge sales.icp and knowledge sales.guardrails: budget, need, timing, decision power. Return {qualified: true|false, why, nextStep}. Store as a record (component=pipeline, type=lead).", "deps": [] },
+    { "name": "demo.prep", "category": "pipeline", "summary": "Prepare a focused demo for one prospect", "prompt": "For a qualified lead, prepare a demo plan tailored to their stated pain: the one outcome to show, the 3 moments that matter, and the single call-to-action. Mirror knowledge sales.voice. Return the plan.", "deps": ["lead.qualify"] },
+    { "name": "objection.handle", "category": "pipeline", "summary": "Answer a specific objection honestly", "prompt": "Given an objection, answer it in knowledge sales.voice: acknowledge the real concern, give the honest tradeoff, and re-anchor on their outcome. Never overpromise. Return the response.", "deps": [] },
+    { "name": "deal.close", "category": "pipeline", "summary": "Propose terms and ask for the decision", "prompt": "Propose clear terms within knowledge sales.guardrails (never below the floor), summarize the value in their words, and ask directly for the decision with a specific next date. Return the proposal.", "deps": [] },
+    { "name": "followup.write", "category": "pipeline", "summary": "Write a short, specific follow-up", "prompt": "Write a brief follow-up that references one concrete thing from the conversation, restates the single next step, and makes it easy to say yes. No filler. Return the message.", "deps": [] }
+  ],
+  "components": [
+    { "name": "pipeline", "category": "growth", "description": "Qualify, demo, handle objections, close, follow up", "operations": ["lead.qualify", "demo.prep", "objection.handle", "deal.close", "followup.write"] }
+  ],
+  "knowledge": [
+    { "category": "sales", "key": "icp", "value": "Describe your ideal customer: who has this problem acutely, can pay, and can decide. Disqualify fast when two of those are missing.", "tags": "sales" },
+    { "category": "sales", "key": "voice", "value": "Warm, specific, zero hype. Lead with their outcome, not your features. Say the honest tradeoff before they ask.", "tags": "sales" },
+    { "category": "sales", "key": "guardrails", "value": "Know your price floor and never quote below it; shrink scope instead. One clear next step per touch. No fake urgency.", "tags": "sales" }
+  ]
+}

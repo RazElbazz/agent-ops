@@ -1,0 +1,18 @@
+{
+  "_note": "A software-delivery starter set (triage → reproduce → fix → review → release). Import with: curl -s localhost:8791/action -H 'content-type: application/json' -d \"{\\\"action\\\":\\\"import.bundle\\\",\\\"payload\\\":$(cat examples/pack-software.json)}\"",
+  "operations": [
+    { "name": "bug.triage", "category": "triage", "summary": "Turn a raw report into a scoped, prioritized bug", "prompt": "From a raw report produce {title, severity (1-3), area, steps-to-reproduce, expected, actual}. If information is missing, list the exact questions to ask. Store it as a record (component=triage, type=bug).", "deps": [] },
+    { "name": "bug.reproduce", "category": "triage", "summary": "Confirm a bug reproduces and isolate it", "prompt": "Given a triaged bug, reproduce it from the steps, confirm expected vs actual, and isolate the smallest failing case. Return {reproduced: true|false, minimalCase, suspectedCause}. Pull bug.triage first.", "deps": ["bug.triage"] },
+    { "name": "bug.fix", "category": "delivery", "summary": "Propose a minimal, reviewed fix", "prompt": "Given a reproduced bug, propose the smallest correct fix plus a test that would have caught it. Follow knowledge style.commits for the change message. Return {diffSummary, test, risk}.", "deps": ["bug.reproduce"] },
+    { "name": "change.review", "category": "delivery", "summary": "Review a change for correctness and risk", "prompt": "Review a proposed change against knowledge style.review: correctness, edge cases, tests, and blast radius. Return {verdict: approve|revise, mustFix[], niceToHave[]}.", "deps": [] },
+    { "name": "release.notes", "category": "delivery", "summary": "Write user-facing release notes from merged changes", "prompt": "Summarize the merged changes into short, user-facing release notes grouped by Added / Fixed / Changed. Plain language, no internal jargon. Return the notes.", "deps": [] }
+  ],
+  "components": [
+    { "name": "triage", "category": "quality", "description": "Intake and confirm bugs", "operations": ["bug.triage", "bug.reproduce"] },
+    { "name": "delivery", "category": "quality", "description": "Fix, review, ship", "operations": ["bug.fix", "change.review", "release.notes"] }
+  ],
+  "knowledge": [
+    { "category": "style", "key": "commits", "value": "Imperative mood, one logical change per commit. First line under 72 chars saying what and why; body explains the reasoning, not the diff.", "tags": "software" },
+    { "category": "style", "key": "review", "value": "Approve small and correct; block only on real defects. Prefer questions over commands. Always ask: what breaks at the edges, and is there a test?", "tags": "software" }
+  ]
+}
