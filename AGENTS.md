@@ -7,17 +7,20 @@ Do **not** rely on memory or static files for *how* to do things. Pull it fresh 
 
 ## On every task
 
+Pick a **stable chat id** for yourself (e.g. `chat-<something>`) and use it on everything below.
+
 1. **Check the server is up:** `curl -s http://localhost:8791/health`. If it fails, start it: `npm --prefix <path-to>/agent-ops start` (or `node --experimental-sqlite <path-to>/agent-ops/server.mjs` — the flag is required on Node 22, a no-op on 24+), then continue.
-2. **Bootstrap:** `GET /manifest` — the current operations, components, and knowledge categories.
-3. **Pull the operation** for your task: `GET /op/<name>` — read its `prompt`, then pull each entry in its `deps` recursively (each dep is itself an operation with its own prompt).
-4. **Pull knowledge** the operation references: `GET /knowledge?category=<c>`.
+2. **Sign in to the pin board** so other chats see you and don't duplicate your work: `POST /action {action:"session.set", payload:{chat, title:"<what you are doing now>", op:"<the operation>", status:"active"}}`. Update it as you go; it shows up live in `GET /sessions` and the UI's Live tab.
+3. **Bootstrap:** `GET /manifest` — the current operations, components, knowledge categories, and endpoints.
+4. **Pull the complete briefing in one call:** `GET /op/<name>/resolve` — it returns the operation, **all** the operations it depends on (recursively), **and** all the knowledge they reference via each operation's `uses`. That is everything you need; you can't miss a fact. (For just one op use `GET /op/<name>`; for more facts `GET /knowledge?category=<c>`.)
 5. **Execute** exactly per those prompts.
-6. **Write every change back** through the one gateway: `POST /action {action, payload, chat:"<your-chat-id>"}`. This is the only way to mutate state (it is atomic and logged). Never edit the DB or state any other way.
-7. **Trace the chain:** `POST /action {action:"trace.add", payload:{op, chain, input, output, status, note}}` so a bad result can later be root-caused.
+6. **Write every change back** through the one gateway: `POST /action {action, payload, chat}`. This is the only way to mutate state (atomic + logged). Never edit the DB or state any other way.
+7. **Record the chain, with timing:** `POST /action {action:"trace.add", payload:{op, chain, status, note, ms}}` so failures can be root-caused and per-chat analytics work.
+8. **Sign out** when the task is done: `POST /action {action:"session.end", payload:{chat}}`.
 
-## Parallel chats
+## Parallel chats (the whole point)
 
-Many agent chats can run under this one project at once; they all share the server, so state is coherent and there are no lost updates. Give each chat a distinct `chat` id on its actions so the audit log and traces show who did what.
+Many chats run under this one project at once; they share the server, so state is coherent with no lost updates. Always: (a) use a distinct `chat` id, (b) keep your `session.set` current so `GET /sessions` shows who is working on what, and (c) glance at `GET /sessions` before starting something so two chats don't do the same thing. That pin board is what makes parallel agents strong instead of chaotic.
 
 ## Finding things
 
