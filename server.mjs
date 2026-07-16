@@ -1,9 +1,9 @@
 // server.mjs — agent-ops API. Zero-dep Node HTTP. The single coordination point for all chats.
-//   Reads:  GET /manifest · /op/:name · /ops · /knowledge?category=&q=&tag= · /component/:name · /components
-//           /tasks · /records?component=&type= · /log · /traces?op= · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
+//   Reads:  GET /manifest · /op/:name · /op/:name/resolve · /op/:name/history · /ops · /knowledge · /components
+//           /tasks · /records · /log · /traces?op= · /sessions · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|update|done|del · knowledge.set|del · op.set|del · component.set|del
-//                    record.add|del · trace.add · ui.set|del · import.bundle
+//                    record.add|del · trace.add · ui.set|del · session.set|end|del · import.bundle
 // Run:  node server.mjs   (if node:sqlite asks for a flag: node --experimental-sqlite server.mjs)
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -21,14 +21,15 @@ const CORS = process.env.ALLOW_ORIGIN || ''
 const today = () => new Date().toISOString().slice(0, 10)
 
 const PROTOCOL = [
-  'agent-ops protocol (the whole rulebook):',
-  '1. On any task, GET /manifest to see the current components, operations, and how to work here.',
-  '2. GET /op/<name> for the operation you need: it returns its prompt (how to do it) and deps (other operations it needs). Pull deps recursively.',
-  '3. GET /knowledge?category=<c> for the facts/rules that operation needs.',
-  '4. Execute per those prompts. Everything is pulled fresh, so it is always current.',
-  '5. Send every mutation as POST /action {action, payload, chat} (atomic + logged). Never write state any other way.',
-  '6. Log a trace of the chain via action trace.add {op,chain,status,note}. When a chain fails, GET /root-cause to see which operation ends failing chains most; read that op, fix its prompt, and POST /action op.set (bumps version). This is the self-improvement loop.',
-  'Discovery: GET /search?q=<term> matches across operations, knowledge, and components.',
+  'agent-ops protocol (the rulebook for working here, especially with several chats at once):',
+  '0. Pick a stable chat id for yourself. When you start a task, POST /action session.set {chat, title:"<what you are doing now>", op, status:"active"} so every other chat sees you on the board (GET /sessions). Update it as you progress; POST /action session.end {chat} when finished. This is how parallel chats avoid duplicating work.',
+  '1. GET /manifest — the current components, operations, knowledge categories, and endpoints.',
+  '2. GET /op/<name>/resolve — returns the operation, ALL operations it depends on (recursively), AND all the knowledge they reference (via each operation\'s `uses`). One call = the complete briefing, so you never miss a fact. (Or GET /op/<name> for one, GET /knowledge?category=<c> for more.)',
+  '3. Execute per those prompts. Everything is pulled fresh, so it is always current.',
+  '4. Send every mutation as POST /action {action, payload, chat} (atomic + logged). Never write state any other way.',
+  '5. Record the chain: POST /action trace.add {op, chain, status, note, ms}. When a chain fails, GET /root-cause to see which operation breaks chains; fix its prompt via op.set (bumps version). That is the self-improvement loop.',
+  'Model: an operation has `deps` (operations it calls) and `uses` (knowledge it needs, as "category" or "category.key"). Put a how-to as an operation prompt; put facts/rules as knowledge and link them with `uses` so the chain always pulls them.',
+  'Discovery: GET /search?q=<term>. Coordination: GET /sessions = who is working on what right now + per-chat analytics.',
 ].join('\n')
 
 // ---- atomic action gateway ----
@@ -42,13 +43,18 @@ const ACTIONS = {
       if (ex) { run('UPDATE knowledge SET value=?, tags=?, updated_at=? WHERE id=?', [p.value, p.tags || '', nowISO(), ex.id]); return { id: ex.id, updated: true } }
       const r = run('INSERT INTO knowledge (category,key,value,tags,updated_at) VALUES (?,?,?,?,?)', [p.category, p.key, p.value, p.tags || '', nowISO()]); return { id: Number(r.lastInsertRowid) } },
   'op.set': p => { const ex = get('SELECT version FROM operations WHERE name=?', [p.name]); const ver = ex ? ex.version + 1 : 1;
-      run('INSERT INTO operations (name,category,summary,prompt,deps,version,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,summary=excluded.summary,prompt=excluded.prompt,deps=excluded.deps,version=excluded.version,updated_at=excluded.updated_at',
-        [p.name, p.category || '', p.summary || '', p.prompt || '', JSON.stringify(asArr(p.deps)), ver, nowISO()]); return { name: p.name, version: ver } },
+      run('INSERT INTO operations (name,category,summary,prompt,deps,uses,version,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,summary=excluded.summary,prompt=excluded.prompt,deps=excluded.deps,uses=excluded.uses,version=excluded.version,updated_at=excluded.updated_at',
+        [p.name, p.category || '', p.summary || '', p.prompt || '', JSON.stringify(asArr(p.deps)), JSON.stringify(asArr(p.uses)), ver, nowISO()]); return { name: p.name, version: ver } },
   'component.set': p => { run('INSERT INTO components (name,category,description,operations,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,description=excluded.description,operations=excluded.operations,updated_at=excluded.updated_at',
         [p.name, p.category || '', p.description || '', JSON.stringify(asArr(p.operations)), nowISO()]); return { name: p.name } },
   'record.add': p => { const r = run('INSERT INTO records (component,type,data,created) VALUES (?,?,?,?)', [p.component, p.type || '', JSON.stringify(p.data || {}), today()]); return { id: Number(r.lastInsertRowid) } },
-  'trace.add': p => { const r = run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note) VALUES (?,?,?,?,?,?,?,?)',
-      [nowISO(), p.chat || '', p.op || '', JSON.stringify(p.chain || []), JSON.stringify(p.input ?? null), JSON.stringify(p.output ?? null), p.status || '', p.note || '']); return { id: Number(r.lastInsertRowid) } },
+  'trace.add': p => { const r = run('INSERT INTO traces (ts,chat,op,chain,input,output,status,note,ms) VALUES (?,?,?,?,?,?,?,?,?)',
+      [nowISO(), p.chat || '', p.op || '', JSON.stringify(p.chain || []), JSON.stringify(p.input ?? null), JSON.stringify(p.output ?? null), p.status || '', p.note || '', typeof p.ms === 'number' ? p.ms : null]); return { id: Number(r.lastInsertRowid) } },
+  // sessions = the live coordination "pin board": each chat reports what it is working on right now.
+  'session.set': p => { const now = nowISO(); run('INSERT INTO sessions (chat,title,detail,op,chain,status,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(chat) DO UPDATE SET title=excluded.title,detail=excluded.detail,op=excluded.op,chain=excluded.chain,status=excluded.status,updated_at=excluded.updated_at',
+      [p.chat, p.title || '', p.detail || '', p.op || '', JSON.stringify(asArr(p.chain)), p.status || 'active', now, now]); return { chat: p.chat } },
+  'session.end': p => { const r = run("UPDATE sessions SET status='done', updated_at=? WHERE chat=?", [nowISO(), p.chat]); return { ok: true, changed: r.changes } },
+  'session.del': p => { const r = run('DELETE FROM sessions WHERE chat=?', [p.chat]); return { ok: true, changed: r.changes } },
   'ui.set': p => { run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [p.key, JSON.stringify(p.value === undefined ? null : p.value), nowISO()]); return { key: p.key } },
   'knowledge.del': p => { const r = run('DELETE FROM knowledge WHERE id=?', [p.id]); return { ok: true, changed: r.changes } },
   'op.del': p => { const r = run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true, changed: r.changes } },
@@ -80,11 +86,13 @@ const SPEC = {
   'task.update': { req: { id: bind }, opt: { title: str, owner: str, stream: str, status: str, deadline: str, due_when: str, note: str, dep: bind, priority: num } },
   'task.done': { req: { id: bind } }, 'task.del': { req: { id: bind } },
   'knowledge.set': { req: { category: str, key: str, value: str }, opt: { tags: str } }, 'knowledge.del': { req: { id: bind } },
-  'op.set': { req: { name: str }, opt: { category: str, summary: str, prompt: str, deps: arr } }, 'op.del': { req: { name: str } },
+  'op.set': { req: { name: str }, opt: { category: str, summary: str, prompt: str, deps: arr, uses: arr } }, 'op.del': { req: { name: str } },
   'component.set': { req: { name: str }, opt: { category: str, description: str, operations: arr } }, 'component.del': { req: { name: str } },
   'record.add': { req: { component: str }, opt: { type: str } }, 'record.del': { req: { id: bind } },
-  'trace.add': { req: { op: str }, opt: { chat: str, status: str, note: str } },
+  'trace.add': { req: { op: str }, opt: { chat: str, status: str, note: str, ms: num } },
   'ui.set': { req: { key: str } }, 'ui.del': { req: { key: str } },
+  'session.set': { req: { chat: str }, opt: { title: str, detail: str, op: str, chain: arr, status: str } },
+  'session.end': { req: { chat: str } }, 'session.del': { req: { chat: str } },
 }
 const LABEL = new Map([[str, 'a string'], [arr, 'an array'], [num, 'a number'], [bind, 'a string or number']])
 function validateAction(action, p) {
@@ -110,8 +118,9 @@ const REQUIRED = {
   'knowledge.set': ['category', 'key', 'value'], 'knowledge.del': ['id'],
   'op.set': ['name'], 'op.del': ['name'], 'component.set': ['name'], 'component.del': ['name'],
   'record.add': ['component'], 'record.del': ['id'], 'trace.add': ['op'], 'ui.set': ['key'], 'ui.del': ['key'],
+  'session.set': ['chat'], 'session.end': ['chat'], 'session.del': ['chat'],
 }
-const opRow = r => r ? ({ ...r, deps: asArr(safeJSON(r.deps, [])) }) : null
+const opRow = r => r ? ({ ...r, deps: asArr(safeJSON(r.deps, [])), uses: asArr(safeJSON(r.uses, [])) }) : null
 const safeJSON = (s, d) => { try { return JSON.parse(s) } catch { return d } }
 
 // Graph integrity: catch a broken operation graph before it bites at runtime.
@@ -144,6 +153,50 @@ function stats() {
     totals: { operations: get('SELECT COUNT(*) n FROM operations').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, records: get('SELECT COUNT(*) n FROM records').n, traces: traces.length, actions: get('SELECT COUNT(*) n FROM actions_log').n },
     runsByOp,
     actionsByType: all('SELECT action, COUNT(*) n FROM actions_log GROUP BY action ORDER BY n DESC'),
+  }
+}
+
+// resolveOp — the complete briefing for a task in ONE call: the operation, every operation it depends on
+// (recursively, in order), and every knowledge item those operations reference via `uses`. This is what
+// guarantees the chain never misses a piece of knowledge: an agent GETs /op/<name>/resolve and has it all.
+// A `uses` entry is either "category.key" (one item) or "category" (every item in the category).
+function resolveOp(name) {
+  if (!get('SELECT name FROM operations WHERE name=?', [name])) return null
+  const seen = new Set(), chain = [], refs = new Set(), missing = []
+  const visit = n => {
+    if (seen.has(n)) return; seen.add(n)
+    const o = opRow(get('SELECT * FROM operations WHERE name=?', [n]))
+    if (!o) { missing.push('operation:' + n); return }
+    chain.push({ name: o.name, category: o.category, summary: o.summary, prompt: o.prompt, deps: o.deps, uses: o.uses, version: o.version })
+    for (const u of o.uses) refs.add(String(u))
+    for (const d of o.deps) visit(d)
+  }
+  visit(name)
+  const knowledge = []
+  for (const ref of refs) {
+    const i = ref.indexOf('.')
+    if (i > 0) { const k = get('SELECT category,key,value,tags FROM knowledge WHERE category=? AND key=?', [ref.slice(0, i), ref.slice(i + 1)]); k ? knowledge.push(k) : missing.push('knowledge:' + ref) }
+    else { const ks = all('SELECT category,key,value,tags FROM knowledge WHERE category=?', [ref]); ks.length ? knowledge.push(...ks) : missing.push('knowledge-category:' + ref) }
+  }
+  return { operation: name, chain, knowledge, missing }
+}
+
+// live coordination view: who is working on what right now + per-chat analytics from the audit log.
+function sessionsView() {
+  const now = Date.now()
+  const sessions = all('SELECT * FROM sessions ORDER BY updated_at DESC').map(s => {
+    const ageMs = now - new Date(s.updated_at || 0).getTime()
+    return { ...s, chain: safeJSON(s.chain, []), live: s.status === 'active' && ageMs < 120000, ageSec: Math.max(0, Math.round(ageMs / 1000)) }
+  })
+  const byChat = {}
+  for (const r of all("SELECT chat, COUNT(*) n, MIN(ts) first, MAX(ts) last FROM actions_log WHERE chat != '' GROUP BY chat")) {
+    byChat[r.chat] = { chat: r.chat, actions: r.n, first: r.first, last: r.last, spanSec: Math.max(0, Math.round((new Date(r.last).getTime() - new Date(r.first).getTime()) / 1000)) }
+  }
+  return {
+    sessions: sessions.map(s => ({ ...s, analytics: byChat[s.chat] || { actions: 0 } })),
+    byChat: Object.values(byChat).sort((a, b) => b.actions - a.actions),
+    recentChains: all('SELECT chat,op,status,ms,ts FROM traces ORDER BY id DESC LIMIT 30').map(t => ({ ...t })),
+    liveCount: sessions.filter(s => s.live).length,
   }
 }
 
@@ -196,7 +249,7 @@ const server = createServer(async (req, res) => {
         knowledgeCategories: all('SELECT category, COUNT(*) n FROM knowledge GROUP BY category ORDER BY category'),
         counts: { tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n },
         endpoints: {
-          reads: ['/manifest', '/op/:name', '/op/:name/history', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/root-cause?op=', '/search?q=', '/lint', '/stats', '/export', '/log', '/ui', '/health'],
+          reads: ['/manifest', '/op/:name', '/op/:name/resolve', '/op/:name/history', '/ops', '/knowledge?category=&q=&tag=', '/component/:name', '/components', '/tasks', '/records?component=&type=', '/traces?op=', '/sessions', '/root-cause?op=', '/search?q=', '/lint', '/stats', '/export', '/log', '/ui', '/health'],
           write: 'POST /action {action, payload, chat} — the one atomic gateway',
           actions: Object.keys(ACTIONS),
         },
@@ -205,6 +258,10 @@ const server = createServer(async (req, res) => {
     if (p === '/health' && req.method === 'GET') return send(res, 200, { ok: true, ts: nowISO(), counts: { operations: get('SELECT COUNT(*) n FROM operations').n, components: get('SELECT COUNT(*) n FROM components').n, knowledge: get('SELECT COUNT(*) n FROM knowledge').n, tasks: get('SELECT COUNT(*) n FROM tasks').n, records: get('SELECT COUNT(*) n FROM records').n } })
     if (p === '/ui' && req.method === 'GET') { const rows = all('SELECT key,value FROM ui'); const o = {}; for (const r of rows) o[r.key] = safeJSON(r.value, r.value); return send(res, 200, o) }
     if (p === '/ops' && req.method === 'GET') return send(res, 200, all('SELECT name,category,summary,version FROM operations ORDER BY category,name'))
+    if (p.startsWith('/op/') && p.endsWith('/resolve') && req.method === 'GET') {
+      const name = safeDecode(p.slice(4, -8)); if (name == null) return send(res, 404, { error: 'no such operation' })
+      const r = resolveOp(name); return r ? send(res, 200, r) : send(res, 404, { error: 'no such operation' })
+    }
     if (p.startsWith('/op/') && p.endsWith('/history') && req.method === 'GET') {
       // Reconstruct an operation's evolution from the audit log (every op.set is recorded) — no extra
       // storage. Lets you see how a prompt changed over versions and recover a prior one (op.set it back).
@@ -231,9 +288,10 @@ const server = createServer(async (req, res) => {
     if (p === '/root-cause' && req.method === 'GET') return send(res, 200, rootCause(q.get('op')))
     if (p === '/lint' && req.method === 'GET') return send(res, 200, lint())
     if (p === '/stats' && req.method === 'GET') return send(res, 200, stats())
+    if (p === '/sessions' && req.method === 'GET') return send(res, 200, sessionsView())
     if (p === '/export' && req.method === 'GET') return send(res, 200, {
       exportedFrom: 'agent-ops', schema: 1,
-      operations: all('SELECT name,category,summary,prompt,deps FROM operations ORDER BY category,name').map(o => ({ ...o, deps: asArr(safeJSON(o.deps, [])) })),
+      operations: all('SELECT name,category,summary,prompt,deps,uses FROM operations ORDER BY category,name').map(o => ({ ...o, deps: asArr(safeJSON(o.deps, [])), uses: asArr(safeJSON(o.uses, [])) })),
       components: all('SELECT name,category,description,operations FROM components ORDER BY category,name').map(c => ({ ...c, operations: asArr(safeJSON(c.operations, [])) })),
       knowledge: all('SELECT category,key,value,tags FROM knowledge ORDER BY category,key'),
       ui: (() => { const o = {}; for (const r of all('SELECT key,value FROM ui')) o[r.key] = safeJSON(r.value, r.value); return o })(),

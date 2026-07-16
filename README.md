@@ -134,7 +134,8 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/manifest` | Bootstrap: components, operations, knowledge categories, counts, protocol |
-| GET | `/op/:name` | One operation: prompt + deps + version |
+| GET | `/op/:name` | One operation: prompt + deps + uses + version |
+| GET | `/op/:name/resolve` | **The complete briefing in one call**: the operation + all its deps (recursively) + all knowledge they reference via `uses`. So a chain never misses a fact. |
 | GET | `/op/:name/history` | How the operation evolved (every version's prompt/deps, from the audit log) |
 | GET | `/ops` | List operations |
 | GET | `/component/:name`, `/components` | Components and their operations |
@@ -142,6 +143,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/search?q=` | One query across operations, knowledge, and components |
 | GET | `/tasks` | The task board |
 | GET | `/records?component=&type=` | Domain records (leads, notes, etc.) |
+| GET | `/sessions` | **Live coordination**: which chats are working on what right now (the pin board) + per-chat analytics (actions, timing) |
 | GET | `/root-cause?op=` | Analyze the trace log: which operation is breaking chains + a fix hint |
 | GET | `/lint` | Graph integrity: operations with missing deps, components referencing missing ops, ops in no component |
 | GET | `/stats` | Usage analytics: runs + success-rate per operation (from traces), action-type breakdown |
@@ -151,7 +153,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/health` | Liveness + counts |
 | POST | `/action` | The one atomic write gateway |
 
-**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `ui.del` · `import.bundle`.
+**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `ui.del` · `session.set` · `session.end` · `session.del` · `import.bundle`.
 
 Share or back up a whole setup: `curl localhost:8791/export > my-system.json`, then on another instance `curl -X POST localhost:8791/action -d '{"action":"import.bundle","payload":'"$(cat my-system.json)"'}'`.
 

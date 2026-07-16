@@ -10,8 +10,8 @@ if (process.argv.includes('--reset')) {
   console.log('reset: all tables cleared')
 }
 const now = nowISO(), today = now.slice(0, 10)
-const op = (name, category, summary, prompt, deps = []) =>
-  run('INSERT INTO operations (name,category,summary,prompt,deps,version,updated_at) VALUES (?,?,?,?,?,1,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,summary=excluded.summary,prompt=excluded.prompt,deps=excluded.deps,updated_at=excluded.updated_at', [name, category, summary, prompt, JSON.stringify(deps), now])
+const op = (name, category, summary, prompt, deps = [], uses = []) =>
+  run('INSERT INTO operations (name,category,summary,prompt,deps,uses,version,updated_at) VALUES (?,?,?,?,?,?,1,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category,summary=excluded.summary,prompt=excluded.prompt,deps=excluded.deps,uses=excluded.uses,updated_at=excluded.updated_at', [name, category, summary, prompt, JSON.stringify(deps), JSON.stringify(uses), now])
 const comp = (name, category, description, operations) =>
   run('INSERT INTO components (name,category,description,operations,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET description=excluded.description,operations=excluded.operations,updated_at=excluded.updated_at', [name, category, description, JSON.stringify(operations), now])
 const kn = (category, key, value, tags = '') => { const e = get('SELECT id FROM knowledge WHERE category=? AND key=?', [category, key]); if (e) run('UPDATE knowledge SET value=?,tags=?,updated_at=? WHERE id=?', [value, tags, now, e.id]); else run('INSERT INTO knowledge (category,key,value,tags,updated_at) VALUES (?,?,?,?,?)', [category, key, value, tags, now]) }
@@ -20,17 +20,20 @@ const kn = (category, key, value, tags = '') => { const e = get('SELECT id FROM 
 op('research.brief', 'research', 'Research a topic into a cited brief',
   'Research the given topic: search multiple sources, verify claims against each other, and synthesize a short, cited brief. Return the brief plus its sources.')
 op('draft.message', 'writing', 'Draft a message in the configured voice',
-  'Draft a message for the given recipient and goal. Follow the tone in knowledge voice.tone. Keep it short and specific. Return the message text only.')
+  'Draft a message for the given recipient and goal. Follow the tone in knowledge voice.tone. Keep it short and specific. Return the message text only.',
+  [], ['voice.tone'])
 op('lead.find', 'outreach', 'Find candidate leads for an ICP',
-  'Find real, verifiable companies that match the ICP described in knowledge outreach.icp. Use web search; never fabricate. Return {company, domain, why} for each, and store them as records (component=outreach, type=lead).')
+  'Find real, verifiable companies that match the ICP described in knowledge outreach.icp. Use web search; never fabricate. Return {company, domain, why} for each, and store them as records (component=outreach, type=lead).',
+  [], ['outreach.icp'])
 op('outreach.batch', 'outreach', 'Full outreach batch: find, draft, output a worklist',
   'Run an outreach batch: (1) lead.find, (2) draft.message for each lead. Render the result as a clean HTML worklist (see knowledge format.output). Log the leads as records and add a follow-up task.',
-  ['lead.find', 'draft.message'])
+  ['lead.find', 'draft.message'], ['format.output'])
 op('doc.render', 'core', 'Render a long output as a clean HTML page',
-  'Render any long output as a clean, organized, self-contained HTML page per knowledge format.output. Save it locally and open it.')
+  'Render any long output as a clean, organized, self-contained HTML page per knowledge format.output. Save it locally and open it.',
+  [], ['format.output'])
 op('meeting.prep', 'sales', 'Prepare a one-page brief before a call',
   'Given a company and a contact, produce a one-page prep: who they are, their likely pain, three questions to ask, and one relevant proof point. Use research.brief for the facts and mirror the tone in knowledge voice.tone.',
-  ['research.brief'])
+  ['research.brief'], ['voice.tone'])
 op('campaign.run', 'outreach', 'Run a full outreach campaign end to end',
   'Run a campaign: outreach.batch to find leads and draft messages, then doc.render the worklist into a shareable page and add a follow-up task per lead. This composes lower-level operations (depth 3): campaign.run -> outreach.batch -> lead.find/draft.message.',
   ['outreach.batch', 'doc.render'])
