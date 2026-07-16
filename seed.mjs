@@ -54,7 +54,7 @@ kn('_meta', 'getting-started', 'This is generic example seed data. Your real, pr
 const uiSet = (key, value) => run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [key, JSON.stringify(value), now])
 uiSet('title', 'agent-ops')
 uiSet('lang', 'en')
-uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'records', 'activity', 'live'])
+uiSet('tabs', ['today', 'overview', 'operations', 'knowledge', 'tasks', 'records', 'activity', 'live'])
 uiSet('buttons', [{ label: 'Add example task', action: 'task.add', payload: { title: 'A task added from a UI button', owner: 'you', priority: 2 } }])
 // an example custom page — proof the UI is moldable: an agent defines pages/blocks via ui.set
 uiSet('pages', [{ id: 'guide', title: 'quick guide', blocks: [
