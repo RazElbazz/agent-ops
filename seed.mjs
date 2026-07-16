@@ -54,8 +54,16 @@ kn('_meta', 'getting-started', 'This is generic example seed data. Your real, pr
 const uiSet = (key, value) => run('INSERT INTO ui (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [key, JSON.stringify(value), now])
 uiSet('title', 'agent-ops')
 uiSet('lang', 'en')
-uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'records', 'activity'])
+uiSet('tabs', ['overview', 'operations', 'knowledge', 'tasks', 'records', 'activity', 'live'])
 uiSet('buttons', [{ label: 'Add example task', action: 'task.add', payload: { title: 'A task added from a UI button', owner: 'you', priority: 2 } }])
+// an example custom page — proof the UI is moldable: an agent defines pages/blocks via ui.set
+uiSet('pages', [{ id: 'guide', title: 'quick guide', blocks: [
+  { h: 'what this is' },
+  { text: 'agent-ops is a shared brain for AI agents. Operations carry a prompt + the operations they depend on; knowledge holds the facts; every chat pulls what a task needs and writes results back through one atomic gateway.' },
+  { h: 'the moves' },
+  { chips: ['GET /manifest', 'GET /op/outreach.batch/resolve', 'POST /action', 'GET /sessions'] },
+  { note: 'This page was defined by an agent via ui.set {key:"pages"}. The whole UI is moldable the same way.' },
+]}])
 
 // ---------- EXAMPLE TASK (only when empty) ----------
 if (get('SELECT COUNT(*) n FROM tasks').n === 0) {
@@ -70,6 +78,14 @@ if (get('SELECT COUNT(*) n FROM records').n === 0) {
   rec('outreach', 'lead', { company: 'Northwind SaaS', domain: 'northwind.example', decisionMaker: 'Sam Lee', role: 'CTO' })
   rec('research', 'brief', { title: 'Example brief: how X works', sources: 3 })
   console.log('seeded 3 example records — see the Records tab')
+}
+
+// ---------- EXAMPLE SESSIONS (only when empty) so the Live pin-board shows something ----------
+if (get('SELECT COUNT(*) n FROM sessions').n === 0) {
+  const sess = (chat, title, op) => run('INSERT INTO sessions (chat,title,detail,op,chain,status,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', [chat, title, '', op, '[]', 'active', now, now])
+  sess('chat-alice', 'running an outreach batch', 'outreach.batch')
+  sess('chat-bob', 'researching a topic', 'research.brief')
+  console.log('seeded 2 example sessions — see the Live tab')
 }
 
 // ---------- EXAMPLE TRACES (only when empty) so /root-cause + the Activity panel show something ----------
