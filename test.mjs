@@ -49,6 +49,8 @@ try {
   ok('component.del removes it', (await post('component.del', { name: '__tc' })).ok === true)
   const recR = await post('record.add', { component: '__tc', type: '__note', data: { hi: 1 } }); ok('record.add returns id', recR.ok && !!recR.result.id)
   ok('record shows in /records', (await get('/records?type=__note')).some(r => r.id === recR.result.id))
+  ok('record.update reports changed=1', (await post('record.update', { id: recR.result.id, data: { hi: 2 } })).result.changed === 1)
+  ok('record.update persisted new data', (await get('/records?type=__note')).find(r => r.id === recR.result.id)?.data.hi === 2)
   await post('record.del', { id: recR.result.id })
   ok('trace.add returns id', !!(await post('trace.add', { op: '__tc', chain: ['a'], status: 'ok' })).result.id)
   const tk = await post('task.add', { title: '__tctask', owner: 'test' }); const tid = tk.result.id

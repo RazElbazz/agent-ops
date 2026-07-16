@@ -3,7 +3,7 @@
 //           /tasks · /records · /log · /traces?op= · /sessions · /search?q= · /root-cause?op= · /lint · /stats · /export · /ui · /health
 //   Writes: POST /action {action, payload, chat}  -> ONE atomic gateway (transaction + audit log).
 //           actions: task.add|update|done|del · knowledge.set|del · op.set|del · component.set|del
-//                    record.add|del · trace.add · ui.set|del · session.set|end|del · import.bundle
+//                    record.add|del|update · trace.add · ui.set|del · session.set|end|del · import.bundle
 // Run:  node server.mjs   (if node:sqlite asks for a flag: node --experimental-sqlite server.mjs)
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -60,6 +60,7 @@ const ACTIONS = {
   'op.del': p => { const r = run('DELETE FROM operations WHERE name=?', [p.name]); return { ok: true, changed: r.changes } },
   'component.del': p => { const r = run('DELETE FROM components WHERE name=?', [p.name]); return { ok: true, changed: r.changes } },
   'record.del': p => { const r = run('DELETE FROM records WHERE id=?', [p.id]); return { ok: true, changed: r.changes } },
+  'record.update': p => { const r = run('UPDATE records SET data=? WHERE id=?', [JSON.stringify(p.data ?? {}), p.id]); return { ok: true, changed: r.changes } },
   'ui.del': p => { const r = run('DELETE FROM ui WHERE key=?', [p.key]); return { ok: true, changed: r.changes } },
   // Import a shared system definition (from GET /export). Upserts ops/components/knowledge/ui in one
   // transaction (each op.set bumps its version). Truly partial-safe: each item is type-validated and
@@ -88,7 +89,7 @@ const SPEC = {
   'knowledge.set': { req: { category: str, key: str, value: str }, opt: { tags: str } }, 'knowledge.del': { req: { id: bind } },
   'op.set': { req: { name: str }, opt: { category: str, summary: str, prompt: str, deps: arr, uses: arr } }, 'op.del': { req: { name: str } },
   'component.set': { req: { name: str }, opt: { category: str, description: str, operations: arr } }, 'component.del': { req: { name: str } },
-  'record.add': { req: { component: str }, opt: { type: str } }, 'record.del': { req: { id: bind } },
+  'record.add': { req: { component: str }, opt: { type: str } }, 'record.del': { req: { id: bind } }, 'record.update': { req: { id: bind } },
   'trace.add': { req: { op: str }, opt: { chat: str, status: str, note: str, ms: num } },
   'ui.set': { req: { key: str } }, 'ui.del': { req: { key: str } },
   'session.set': { req: { chat: str }, opt: { title: str, detail: str, op: str, chain: arr, status: str } },
@@ -117,7 +118,7 @@ const REQUIRED = {
   'task.add': ['title'], 'task.update': ['id'], 'task.done': ['id'], 'task.del': ['id'],
   'knowledge.set': ['category', 'key', 'value'], 'knowledge.del': ['id'],
   'op.set': ['name'], 'op.del': ['name'], 'component.set': ['name'], 'component.del': ['name'],
-  'record.add': ['component'], 'record.del': ['id'], 'trace.add': ['op'], 'ui.set': ['key'], 'ui.del': ['key'],
+  'record.add': ['component'], 'record.del': ['id'], 'record.update': ['id'], 'trace.add': ['op'], 'ui.set': ['key'], 'ui.del': ['key'],
   'session.set': ['chat'], 'session.end': ['chat'], 'session.del': ['chat'],
 }
 const opRow = r => r ? ({ ...r, deps: asArr(safeJSON(r.deps, [])), uses: asArr(safeJSON(r.uses, [])) }) : null

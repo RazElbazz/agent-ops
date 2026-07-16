@@ -153,7 +153,7 @@ curl -X POST http://localhost:8791/action -H "content-type: application/json" \
 | GET | `/health` | Liveness + counts |
 | POST | `/action` | The one atomic write gateway |
 
-**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `trace.add` · `ui.set` · `ui.del` · `session.set` · `session.end` · `session.del` · `import.bundle`.
+**Actions** (sent as `POST /action {action, payload, chat}`): `task.add` · `task.update` · `task.done` · `task.del` · `knowledge.set` · `knowledge.del` · `op.set` · `op.del` · `component.set` · `component.del` · `record.add` · `record.del` · `record.update` · `trace.add` · `ui.set` · `ui.del` · `session.set` · `session.end` · `session.del` · `import.bundle`.
 
 Share or back up a whole setup: `curl localhost:8791/export > my-system.json`, then on another instance `curl -X POST localhost:8791/action -d '{"action":"import.bundle","payload":'"$(cat my-system.json)"'}'`.
 
